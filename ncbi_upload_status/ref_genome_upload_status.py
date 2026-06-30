@@ -17,6 +17,41 @@ conn = psycopg2.connect(dbname=p["dbname"], user=p["user"], password=p["password
 cur = conn.cursor()
 
 sql = """
+/* -----------------------------------------------------------
+   Reference genome upload status
+
+   Upload status logic:
+   - 'all uploaded'          both haplotype assembly accessions
+                             (JBXXXX) present AND at least one
+                             SRR accession released on NCBI.
+   - 'hap1/hap2 uploaded'    assembly accession (JBXXXX) present
+                             in ref_genomes_assembly_uploads.
+   - 'hap1/hap2 pending'     BioProject registered but no assembly
+                             accession yet — data not yet uploaded.
+   - 'raw data <status>' /
+     'raw <type> <status>,
+      raw <type> <status>'   SRR status for the og_id. If all known
+                             SRR statuses agree, shown once as
+                             'raw data <status>' (e.g. released). If
+                             they differ across data types, each is
+                             listed separately prefixed with its
+                             type, e.g. 'raw hic released, raw hifi
+                             tobereleased'.
+   - 'raw data pending'      rawdata BioProject registered but no
+                             SRR accession exists yet.
+   - 'not registered on NCBI' no entry in ref_genomes_assembly_uploads
+                             AND no value (NULL or empty string) in
+                             sample.ncbi_biosample_id,
+                             bioproject_id_haplotype_1/2,
+                             bioproject_sequencing_data, or
+                             ncbi_bioproject_id_lvl_3_hifi.
+   - 'registered in sample,
+      pending sync'          no entry in ref_genomes_assembly_uploads
+                             yet, but one of the sample columns above
+                             already holds a value — registration has
+                             started upstream but hasn't synced to
+                             ref_genomes_assembly_uploads yet.
+----------------------------------------------------------- */
 WITH validated AS (
     SELECT DISTINCT ON (og_id)
         og_id,
@@ -32,6 +67,10 @@ sra_summary AS (
     SELECT
         og_id,
         bool_or(ncbi_status = 'Released') AS any_sra_released,
+        COUNT(DISTINCT LOWER(ncbi_status)) AS raw_status_variety,
+        STRING_AGG(DISTINCT LOWER(ncbi_status), ', ' ORDER BY LOWER(ncbi_status)) AS raw_data_status,
+        STRING_AGG(DISTINCT 'raw ' || data_type || ' ' || LOWER(ncbi_status), ', '
+                   ORDER BY 'raw ' || data_type || ' ' || LOWER(ncbi_status)) AS raw_data_status_by_type,
         STRING_AGG(srr_accession, ', ') FILTER (WHERE data_type = 'hifi')     AS hifi_srr,
         STRING_AGG(srr_accession, ', ') FILTER (WHERE data_type = 'hic')      AS hic_srr,
         STRING_AGG(srr_accession, ', ') FILTER (WHERE data_type = 'ont')      AS ont_srr,
@@ -70,7 +109,14 @@ SELECT
     COALESCE(u.embargo_status, s.embargo_status) AS embargo_status,
     CASE
         WHEN u.og_id IS NULL
+         AND NULLIF(s.ncbi_biosample_id, '') IS NULL
+         AND NULLIF(s.bioproject_id_haplotype_1, '') IS NULL
+         AND NULLIF(s.bioproject_id_haplotype_2, '') IS NULL
+         AND NULLIF(s.bioproject_sequencing_data, '') IS NULL
+         AND NULLIF(s.ncbi_bioproject_id_lvl_3_hifi, '') IS NULL
             THEN 'not registered on NCBI'
+        WHEN u.og_id IS NULL
+            THEN 'registered in sample, pending sync'
         WHEN u.assembly_accession_hap1 IS NOT NULL
          AND u.assembly_accession_hap2 IS NOT NULL
          AND COALESCE(ss.any_sra_released, false)
@@ -85,8 +131,9 @@ SELECT
                 WHEN u.bioproject_hap2         IS NOT NULL THEN 'hap2 pending'
             END,
             CASE
-                WHEN COALESCE(ss.any_sra_released, false)  THEN 'raw data released'
-                WHEN u.bioproject_rawdata IS NOT NULL       THEN 'raw data pending'
+                WHEN ss.raw_status_variety > 1        THEN ss.raw_data_status_by_type
+                WHEN ss.raw_status_variety = 1        THEN 'raw data ' || ss.raw_data_status
+                WHEN u.bioproject_rawdata IS NOT NULL THEN 'raw data pending'
             END
         )
     END AS upload_status
