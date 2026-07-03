@@ -17,59 +17,69 @@ conn = psycopg2.connect(dbname=p["dbname"], user=p["user"], password=p["password
 cur = conn.cursor()
 
 sql = """
-WITH eligible_ogs AS (
-  SELECT s.og_id
-  FROM sample s
-  WHERE (
-          s.workflow = 'Draft'
-          OR (
-               s.workflow IN ('Not assigned', 'N/A', '')
-               AND s.il_status = 'Sequenced'
-             )
-        )
-    AND s.ncbi_bioproject_id_draft IS NULL
-    AND s.draft_sra_accessions IS NULL
-    AND s.draft_assembly_accession IS NULL
+/* -----------------------------------------------------------
+   Draft genome upload status
 
-  UNION
+   Scope: one row per og_id (the latest seq_date, for og_ids
+   with multiple draft_genomes entries), matched to a sample
+   record.
 
-  SELECT dg.og_id
-  FROM draft_genomes dg
-  JOIN sample s ON s.og_id = dg.og_id
-  WHERE (dg.biosample_accession IS NULL OR dg.biosample_accession !~* '^SAM')
-    AND (dg.bioproject_accession IS NULL OR dg.bioproject_accession !~* '^PRJ')
-    AND (dg.sra_accession IS NULL OR dg.sra_accession !~* '^SRR')
+   Upload status logic (checked top-down, first match wins; the
+   first three all require aws_assm to be present):
+   - 'all uploaded'                  biosample_accession, bioproject_accession,
+                                      sra_accession, AND assembly_accession all
+                                      present and validly formatted.
+   - 'raw uploaded, assembly
+      pending'                       biosample_accession, bioproject_accession,
+                                      AND sra_accession present, but
+                                      assembly_accession still NULL.
+   - 'raw+assembly needs
+      uploading'                     assembly file ready (aws_assm present)
+                                      but biosample_accession, bioproject_accession,
+                                      sra_accession, AND assembly_accession are
+                                      all NULL - nothing registered yet.
+   - 'missing .fna or fields'        catch-all: aws_assm is NULL (no assembly
+                                      file yet), or any other partial state not
+                                      covered above.
+----------------------------------------------------------- */
+WITH latest AS (
+    SELECT DISTINCT ON (og_id) *
+    FROM draft_genomes
+    ORDER BY og_id, seq_date DESC
 )
 SELECT
-    s.og_id,
-    s.ncbi_bioproject_id_lvl_3_hifi,
-    s.ncbi_biosample_id,
-    s.ncbi_bioproject_id_draft,
-    dg.biosample_accession,
-    dg.bioproject_accession,
-    s.draft_sra_accessions,
-    dg.sra_accession,
+    dg.og_id,
     s.nominal_species_id,
     dg.aws_assm,
-    s.workflow,
-    s.il_status,
+    dg.biosample_accession,
+    dg.bioproject_accession,
+    dg.sra_accession,
+    dg.assembly_accession,
     s.embargo_status,
     CASE
-      WHEN dg.aws_assm IS NULL THEN 'missing .fna'
-      WHEN (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
+      WHEN dg.aws_assm IS NOT NULL
+       AND (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
        AND (dg.bioproject_accession IS NOT NULL AND dg.bioproject_accession ~* '^PRJ')
-       AND (
-             (dg.sra_accession IS NOT NULL AND dg.sra_accession ~* '^SRR')
-             OR
-             (s.draft_sra_accessions IS NOT NULL AND s.draft_sra_accessions ~* 'SRR[0-9]+')
-           )
-      THEN 'uploaded'
-      ELSE 'needs_uploading'
+       AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^SRR')
+       AND NULLIF(dg.assembly_accession, '') IS NOT NULL
+        THEN 'all uploaded'
+      WHEN dg.aws_assm IS NOT NULL
+       AND (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
+       AND (dg.bioproject_accession IS NOT NULL AND dg.bioproject_accession ~* '^PRJ')
+       AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^SRR')
+       AND NULLIF(dg.assembly_accession, '') IS NULL
+        THEN 'raw uploaded, assembly pending'
+      WHEN dg.aws_assm IS NOT NULL
+       AND dg.biosample_accession IS NULL
+       AND dg.bioproject_accession IS NULL
+       AND dg.sra_accession IS NULL
+       AND NULLIF(dg.assembly_accession, '') IS NULL
+        THEN 'raw+assembly needs uploading'
+      ELSE 'missing .fna or fields'
     END AS upload_status
-FROM sample s
-JOIN eligible_ogs e ON s.og_id = e.og_id
-LEFT JOIN draft_genomes dg ON dg.og_id = s.og_id
-ORDER BY s.og_id
+FROM latest dg
+JOIN sample s ON s.og_id = dg.og_id
+ORDER BY dg.og_id
 """
 
 cur.execute(sql)
