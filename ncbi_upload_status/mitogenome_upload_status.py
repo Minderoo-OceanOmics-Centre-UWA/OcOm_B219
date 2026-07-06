@@ -17,6 +17,19 @@ conn = psycopg2.connect(dbname=p["dbname"], user=p["user"], password=p["password
 cur = conn.cursor()
 
 sql = """
+/* -----------------------------------------------------------
+   Mitogenome upload status
+
+   Scope: one row per og_id (excluding "_concat" merged records),
+   using the best available sequencing technology (priority
+   hifi > hic > ilmn) and its latest assembly attempt (seq_date and code), matched
+   to a sample record for embargo_status.
+
+   Upload status logic:
+   - '<tech> uploaded'   genbank_accession present for the
+                         chosen technology, e.g. 'hifi uploaded'.
+   - 'needs_uploading'   no genbank_accession yet.
+----------------------------------------------------------- */
 WITH base AS (
   SELECT
       m.og_num,
