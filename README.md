@@ -35,28 +35,6 @@ Reports NCBI upload status for reference genomes at assembly stage 3.
 
 **Filters:** OGs with a validated species name in `lca_validation` (deduplicated to the most recent record per OG) and a stage 3 entry in `ref_genomes`.
 
-**Key columns:**
-
-| Column | Source | Description |
-|--------|--------|-------------|
-| `og_id` | lca_validation | OG identifier |
-| `tech` | lca_validation | Sequencing technology of the validated record |
-| `validated_species_name` | lca_validation | Most recent validated species name |
-| `nominal_species_id` / `common_name` / `tol_id` / `ncbi_id` / `workflow` | sample | Species and sample metadata |
-| `biosample` | ref_genomes_assembly_uploads | NCBI BioSample accession (SAMN…) |
-| `bioproject_umbrella` | ref_genomes_assembly_uploads | Species-level parent BioProject (PRJNA…) |
-| `bioproject_hap1` | ref_genomes_assembly_uploads | Haplotype 1 assembly BioProject |
-| `assembly_accession_hap1` | ref_genomes_assembly_uploads | GenBank assembly accession (JBXXXX…) |
-| `bioproject_hap2` | ref_genomes_assembly_uploads | Haplotype 2 assembly BioProject |
-| `assembly_accession_hap2` | ref_genomes_assembly_uploads | GenBank assembly accession (JBXXXX…) |
-| `bioproject_rawdata` | ref_genomes_assembly_uploads | Raw sequencing data BioProject |
-| `hifi_srr` / `hifi_status` | ref_genomes_sra_uploads | HiFi SRR accession and release status |
-| `hic_srr` / `hic_status` | ref_genomes_sra_uploads | Hi-C SRR accession and release status |
-| `ont_srr` / `ont_status` | ref_genomes_sra_uploads | ONT SRR accession and release status |
-| `illumina_srr` / `illumina_status` | ref_genomes_sra_uploads | Illumina SRR accession and release status |
-| `embargo_status` | ref_genomes_assembly_uploads, falls back to sample | Release or Embargo |
-| `upload_status` | computed | See below |
-
 **Upload status values:**
 
 `upload_status` is either one of two fixed values, or a composite string built from up to three parts (hap1 status, hap2 status, raw data status) joined with `, `:
@@ -80,20 +58,6 @@ Reports NCBI upload status for draft genomes, one row per `og_id` (using the lat
 
 **Filters:** none — every `og_id` in `draft_genomes` that also has a matching `sample` row is included.
 
-**Key columns:**
-
-| Column | Source | Description |
-|--------|--------|-------------|
-| `og_id` | draft_genomes | OG identifier |
-| `nominal_species_id` | sample | Species name |
-| `aws_assm` | draft_genomes | S3 path to the assembly `.fna` file |
-| `biosample_accession` | draft_genomes | NCBI BioSample accession (SAMN…) |
-| `bioproject_accession` | draft_genomes | NCBI BioProject accession (PRJNA…) |
-| `sra_accession` | draft_genomes | NCBI SRA accession (SRR…) |
-| `assembly_accession` | draft_genomes | NCBI GenBank assembly accession (JBXXXX…) |
-| `embargo_status` | sample | Release or Embargo |
-| `upload_status` | computed | See below |
-
 **Upload status values** (checked top-down, first match wins; the first three all require `aws_assm` to be present):
 
 | Value | Meaning |
@@ -113,19 +77,6 @@ Reports GenBank upload status for mitogenomes, one row per OG using the best ava
 - Excludes `_concat` OG IDs.
 - Deduplicates to the most recent record per OG + technology.
 - Selects one technology per OG by priority.
-
-**Key columns:**
-
-| Column | Source | Description |
-|--------|--------|-------------|
-| `og_id` | mitogenome_data | OG identifier |
-| `og_num` | mitogenome_data | Numeric OG number |
-| `tech` | mitogenome_data | Sequencing technology used (hifi/hic/ilmn) |
-| `seq_date` | mitogenome_data | Sequencing date (YYMMDD) |
-| `code` | mitogenome_data | Assembly pipeline version/code |
-| `genbank_accession` | mitogenome_data | GenBank accession if submitted |
-| `embargo_status` | sample | Release or Embargo |
-| `upload_status` | computed | See below |
 
 **Upload status values:**
 
