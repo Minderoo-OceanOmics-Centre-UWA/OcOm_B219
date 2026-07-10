@@ -51,8 +51,39 @@ sql = """
                              already holds a value — registration has
                              started upstream but hasn't synced to
                              ref_genomes_assembly_uploads yet.
+
+   data_quality_flag (informational, does not affect upload_status):
+   - 'no hifi/hic validation
+      matching stage-3 seq_date'  the preferred validated_species_name
+                             (from a hifi/hic lca_validation row whose
+                             seq_date matches the stage-3 ref_genomes
+                             row) wasn't found; fell back to the latest
+                             validated record overall, regardless of
+                             tech or seq_date.
+   - 'species mismatch:
+      validated vs nominal'  validated_species_name disagrees with
+                             sample.nominal_species_id.
 ----------------------------------------------------------- */
-WITH validated AS (
+WITH rg3 AS (
+    SELECT DISTINCT og_id, seq_date
+    FROM ref_genomes
+    WHERE stage = 3
+),
+matched AS (
+    SELECT DISTINCT ON (lv.og_id)
+        lv.og_id,
+        lv.tech,
+        lv.seq_date,
+        lv.validated_species_name,
+        lv.validator
+    FROM lca_validation lv
+    JOIN rg3 ON rg3.og_id = lv.og_id AND rg3.seq_date = lv.seq_date
+    WHERE lv.tech IN ('hifi', 'hic')
+      AND lv.validated_species_name IS NOT NULL
+      AND lv.validated_species_name <> ''
+    ORDER BY lv.og_id, CASE lv.tech WHEN 'hifi' THEN 0 ELSE 1 END, lv.row_created_on DESC
+),
+fallback AS (
     SELECT DISTINCT ON (og_id)
         og_id,
         tech,
@@ -62,6 +93,16 @@ WITH validated AS (
     WHERE validated_species_name IS NOT NULL
       AND validated_species_name <> ''
     ORDER BY og_id, row_created_on DESC
+),
+validated AS (
+    SELECT
+        f.og_id,
+        COALESCE(m.tech, f.tech) AS tech,
+        COALESCE(m.validated_species_name, f.validated_species_name) AS validated_species_name,
+        COALESCE(m.validator, f.validator) AS validator,
+        (m.og_id IS NULL) AS used_fallback
+    FROM fallback f
+    LEFT JOIN matched m ON m.og_id = f.og_id
 ),
 sra_summary AS (
     SELECT
@@ -107,6 +148,11 @@ SELECT
     ss.illumina_srr,
     ss.illumina_status,
     COALESCE(u.embargo_status, s.embargo_status) AS embargo_status,
+    CONCAT_WS(', ',
+        CASE WHEN v.used_fallback THEN 'no hifi/hic validation matching stage-3 seq_date' END,
+        CASE WHEN v.validated_species_name IS DISTINCT FROM s.nominal_species_id
+             THEN 'species mismatch: validated vs nominal' END
+    ) AS data_quality_flag,
     CASE
         WHEN u.og_id IS NULL
          AND NULLIF(s.ncbi_biosample_id, '') IS NULL
@@ -170,5 +216,23 @@ else:
 print(f"\nTotal: {len(rows)} OGs")
 for status, count in sorted(Counter(dict(zip(cols, r))['upload_status'] for r in rows).items()):
     print(f"  {status}: {count}")
+
+# --- Separate data quality issues report ---
+flag_idx = cols.index('data_quality_flag')
+flagged_rows = [r for r in rows if r[flag_idx]]
+
+if out_path:
+    flag_path = out_path.with_name(f"{out_path.stem}_data_quality_issues{out_path.suffix}")
+    with open(flag_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(cols)
+        writer.writerows(flagged_rows)
+    print(f"\nData quality issues ({len(flagged_rows)} rows) written to {flag_path}")
+else:
+    print(f"\nData quality issues: {len(flagged_rows)} rows")
+    if flagged_rows:
+        print('\t'.join(cols))
+        for row in flagged_rows:
+            print('\t'.join('' if x is None else str(x) for x in row))
 
 conn.close()

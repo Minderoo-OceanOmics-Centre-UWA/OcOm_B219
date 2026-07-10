@@ -29,6 +29,19 @@ sql = """
    - '<tech> uploaded'   genbank_accession present for the
                          chosen technology, e.g. 'hifi uploaded'.
    - 'needs_uploading'   no genbank_accession yet.
+
+   data_quality_flag (informational, does not affect upload_status):
+   - 'no validated species name
+      recorded'          no lca_validation row at all has a
+                         validated_species_name for this og_id.
+   - 'no <tech> validation
+      matching seq_date'  validated species name exists, but not from
+                         a row matching the chosen technology AND
+                         seq_date; fell back to the latest validated
+                         record overall, regardless of tech/seq_date.
+   - 'species mismatch: validated
+      vs nominal'         validated_species_name disagrees with
+                         sample.nominal_species_id.
 ----------------------------------------------------------- */
 WITH base AS (
   SELECT
@@ -39,6 +52,7 @@ WITH base AS (
       m.code,
       m.genbank_accession,
       s.embargo_status,
+      s.nominal_species_id,
       CASE
         WHEN m.genbank_accession IS NOT NULL
              AND BTRIM(m.genbank_accession) <> '' THEN 1
@@ -85,22 +99,64 @@ chosen AS (
     END AS chosen_tech
   FROM dedup d
   JOIN og_flags f USING (og_id)
+),
+picked AS (
+  SELECT * FROM chosen WHERE LOWER(tech) = LOWER(chosen_tech)
+),
+matched AS (
+  SELECT DISTINCT ON (lv.og_id)
+      lv.og_id,
+      lv.validated_species_name
+  FROM lca_validation lv
+  JOIN picked pk
+    ON pk.og_id = lv.og_id
+   AND LOWER(lv.tech) = LOWER(pk.chosen_tech)
+   AND lv.seq_date = pk.seq_date
+  WHERE lv.validated_species_name IS NOT NULL
+    AND lv.validated_species_name <> ''
+  ORDER BY lv.og_id, lv.row_created_on DESC
+),
+fallback AS (
+  SELECT DISTINCT ON (og_id)
+      og_id, validated_species_name
+  FROM lca_validation
+  WHERE validated_species_name IS NOT NULL
+    AND validated_species_name <> ''
+  ORDER BY og_id, row_created_on DESC
+),
+validated AS (
+  SELECT
+      pk.og_id,
+      COALESCE(m.validated_species_name, f.validated_species_name) AS validated_species_name,
+      (f.og_id IS NULL) AS no_validation,
+      (f.og_id IS NOT NULL AND m.og_id IS NULL) AS used_fallback
+  FROM picked pk
+  LEFT JOIN matched m ON m.og_id = pk.og_id
+  LEFT JOIN fallback f ON f.og_id = pk.og_id
 )
 SELECT
-  og_num,
-  og_id,
-  tech,
-  seq_date,
-  code,
-  genbank_accession,
-  embargo_status,
+  pk.og_num,
+  pk.og_id,
+  pk.tech,
+  pk.seq_date,
+  pk.code,
+  pk.genbank_accession,
+  pk.embargo_status,
+  v.validated_species_name,
+  CONCAT_WS(', ',
+      CASE WHEN v.no_validation THEN 'no validated species name recorded' END,
+      CASE WHEN v.used_fallback THEN 'no ' || LOWER(pk.chosen_tech) || ' validation matching seq_date' END,
+      CASE WHEN NOT v.no_validation
+            AND v.validated_species_name IS DISTINCT FROM pk.nominal_species_id
+           THEN 'species mismatch: validated vs nominal' END
+  ) AS data_quality_flag,
   CASE
-    WHEN has_accession = 1 THEN LOWER(chosen_tech) || ' uploaded'
+    WHEN pk.has_accession = 1 THEN LOWER(pk.chosen_tech) || ' uploaded'
     ELSE 'needs_uploading'
   END AS upload_status
-FROM chosen
-WHERE LOWER(tech) = LOWER(chosen_tech)
-ORDER BY og_id
+FROM picked pk
+LEFT JOIN validated v ON v.og_id = pk.og_id
+ORDER BY pk.og_id
 """
 
 cur.execute(sql)
@@ -122,5 +178,23 @@ else:
 print(f"\nTotal: {len(rows)} OGs")
 for status, count in sorted(Counter(dict(zip(cols, r))['upload_status'] for r in rows).items()):
     print(f"  {status}: {count}")
+
+# --- Separate data quality issues report ---
+flag_idx = cols.index('data_quality_flag')
+flagged_rows = [r for r in rows if r[flag_idx]]
+
+if out_path:
+    flag_path = out_path.with_name(f"{out_path.stem}_data_quality_issues{out_path.suffix}")
+    with open(flag_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(cols)
+        writer.writerows(flagged_rows)
+    print(f"\nData quality issues ({len(flagged_rows)} rows) written to {flag_path}")
+else:
+    print(f"\nData quality issues: {len(flagged_rows)} rows")
+    if flagged_rows:
+        print('\t'.join(cols))
+        for row in flagged_rows:
+            print('\t'.join('' if x is None else str(x) for x in row))
 
 conn.close()
