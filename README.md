@@ -22,8 +22,8 @@ singularity run $SING/psycopg2:0.1.sif python <script.py> \
     ~/postgresql_details/oceanomics.cfg [output.csv]
 ```
 
-- Without `output.csv`: prints tab-separated results to stdout with a summary.
-- With `output.csv`: writes a CSV file and prints the summary.
+- Without `output.csv`: prints tab-separated results to stdout with a summary, followed by a separate "data quality issues" section (rows with a non-empty `data_quality_flag`).
+- With `output.csv`: writes a CSV file and prints the summary. Also writes a companion `<name>_data_quality_issues.csv` alongside it, containing only the flagged rows.
 
 ---
 
@@ -50,6 +50,13 @@ Reports NCBI upload status for reference genomes at assembly stage 3.
 | `raw <type> <status>, raw <type> <status>` | SRR statuses differ across data types, each listed separately, e.g. `raw hic released, raw hifi tobereleased` |
 | `raw data pending` | Rawdata BioProject registered but no SRR accession exists yet |
 
+**Data quality flag** (informational, independent of `upload_status`; matches `lca_validation` against the stage-3 `seq_date`, preferring hifi over hic):
+
+| Value | Meaning |
+|-------|---------|
+| `no hifi/hic validation matching stage-3 seq_date` | No hifi/hic `lca_validation` row matches this OG's stage-3 `seq_date` — fell back to the latest validated record overall, regardless of tech/seq_date |
+| `species mismatch: validated vs nominal` | `validated_species_name` disagrees with `sample.nominal_species_id` |
+
 ---
 
 ### `draft_genome_upload_status.py`
@@ -66,6 +73,14 @@ Reports NCBI upload status for draft genomes, one row per `og_id` (using the lat
 | `raw uploaded, assembly pending` | `biosample_accession`, `bioproject_accession`, AND `sra_accession` present, but `assembly_accession` still NULL |
 | `raw+assembly needs uploading` | Assembly file ready (`aws_assm` present) but `biosample_accession`, `bioproject_accession`, `sra_accession`, AND `assembly_accession` are all NULL — nothing registered yet |
 | `missing .fna or fields` | Catch-all: `aws_assm` is NULL (no assembly file yet), or any other partial state not covered above |
+
+**Data quality flag** (informational, independent of `upload_status`; matches `lca_validation` against this record's `seq_date`, tech = ilmn):
+
+| Value | Meaning |
+|-------|---------|
+| `no validated species name recorded` | No `lca_validation` row at all has a validated species name for this OG |
+| `no ilmn validation matching seq_date` | A validated species name exists, but not from an ilmn-tech row matching this `draft_genomes` `seq_date` — fell back to the latest validated record overall |
+| `species mismatch: validated vs nominal` | `validated_species_name` disagrees with `sample.nominal_species_id` |
 
 ---
 
@@ -86,6 +101,14 @@ Reports GenBank upload status for mitogenomes, one row per OG using the best ava
 | `hic uploaded` | GenBank accession present, assembled from Hi-C |
 | `ilmn uploaded` | GenBank accession present, assembled from Illumina |
 | `needs_uploading` | No GenBank accession recorded |
+
+**Data quality flag** (informational, independent of `upload_status`; matches `lca_validation` against this record's `seq_date` and its chosen technology):
+
+| Value | Meaning |
+|-------|---------|
+| `no validated species name recorded` | No `lca_validation` row at all has a validated species name for this OG |
+| `no <tech> validation matching seq_date` | A validated species name exists, but not from a row matching the OG's chosen technology AND `seq_date` — fell back to the latest validated record overall |
+| `species mismatch: validated vs nominal` | `validated_species_name` disagrees with `sample.nominal_species_id` |
 
 ---
 
