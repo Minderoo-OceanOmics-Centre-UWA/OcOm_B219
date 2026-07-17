@@ -24,8 +24,8 @@ sql = """
    with multiple draft_genomes entries), matched to a sample
    record.
 
-   Upload status logic (checked top-down, first match wins; the
-   first three all require aws_assm to be present):
+   Upload status logic (checked top-down, first match wins;
+   aws_assm is informational only and no longer gates any status):
    - 'all uploaded'                  biosample_accession, bioproject_accession,
                                       sra_accession, AND assembly_accession all
                                       present and validly formatted.
@@ -34,13 +34,9 @@ sql = """
                                       AND sra_accession present, but
                                       assembly_accession still NULL.
    - 'raw+assembly needs
-      uploading'                     assembly file ready (aws_assm present)
-                                      but biosample_accession, bioproject_accession,
-                                      sra_accession, AND assembly_accession are
-                                      all NULL - nothing registered yet.
-   - 'missing .fna or fields'        catch-all: aws_assm is NULL (no assembly
-                                      file yet), or any other partial state not
-                                      covered above.
+      uploading'                     catch-all: covers both "nothing
+                                      registered yet" (all four fields NULL)
+                                      and any other partial state.
 
    data_quality_flag (informational, does not affect upload_status):
    - 'no validated species name
@@ -109,25 +105,17 @@ SELECT
              THEN 'species mismatch: validated vs nominal' END
     ) AS data_quality_flag,
     CASE
-      WHEN dg.aws_assm IS NOT NULL
-       AND (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
+      WHEN (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
        AND (dg.bioproject_accession IS NOT NULL AND dg.bioproject_accession ~* '^PRJ')
        AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^SRR')
        AND NULLIF(dg.assembly_accession, '') IS NOT NULL
         THEN 'all uploaded'
-      WHEN dg.aws_assm IS NOT NULL
-       AND (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
+      WHEN (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
        AND (dg.bioproject_accession IS NOT NULL AND dg.bioproject_accession ~* '^PRJ')
        AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^SRR')
        AND NULLIF(dg.assembly_accession, '') IS NULL
         THEN 'raw uploaded, assembly pending'
-      WHEN dg.aws_assm IS NOT NULL
-       AND dg.biosample_accession IS NULL
-       AND dg.bioproject_accession IS NULL
-       AND dg.sra_accession IS NULL
-       AND NULLIF(dg.assembly_accession, '') IS NULL
-        THEN 'raw+assembly needs uploading'
-      ELSE 'missing .fna or fields'
+      ELSE 'raw+assembly needs uploading'
     END AS upload_status
 FROM latest dg
 JOIN sample s ON s.og_id = dg.og_id
