@@ -20,12 +20,13 @@ sql = """
 /* -----------------------------------------------------------
    Draft genome upload status
 
-   Scope: one row per og_id (the latest seq_date, for og_ids
-   with multiple draft_genomes entries), matched to a sample
-   record.
+   Scope: one row per og_id, matched to a sample record. For
+   og_ids with multiple draft_genomes entries, prioritizes the
+   row whose seq_date has a matching ilmn lca_validation record;
+   falls back to the latest seq_date only if none of the OG's
+   rows have a matching validation.
 
-   Upload status logic (checked top-down, first match wins;
-   aws_assm is informational only and no longer gates any status):
+   Upload status logic:
    - 'all uploaded'                  biosample_accession, bioproject_accession,
                                       sra_accession, AND assembly_accession all
                                       present and validly formatted.
@@ -52,10 +53,20 @@ sql = """
       vs nominal'                   validated_species_name disagrees with
                                       sample.nominal_species_id.
 ----------------------------------------------------------- */
-WITH latest AS (
-    SELECT DISTINCT ON (og_id) *
-    FROM draft_genomes
-    ORDER BY og_id, seq_date DESC
+WITH validation_match AS (
+    SELECT DISTINCT dg.og_id, dg.seq_date
+    FROM draft_genomes dg
+    WHERE EXISTS (
+        SELECT 1 FROM lca_validation lv
+        WHERE lv.og_id = dg.og_id AND lv.seq_date = dg.seq_date AND lv.tech = 'ilmn'
+          AND lv.validated_species_name IS NOT NULL AND lv.validated_species_name <> ''
+    )
+),
+latest AS (
+    SELECT DISTINCT ON (dg.og_id) dg.*
+    FROM draft_genomes dg
+    LEFT JOIN validation_match vm ON vm.og_id = dg.og_id AND vm.seq_date = dg.seq_date
+    ORDER BY dg.og_id, (vm.seq_date IS NOT NULL) DESC, dg.seq_date DESC
 ),
 matched AS (
     SELECT DISTINCT ON (lv.og_id)
@@ -91,7 +102,6 @@ SELECT
     dg.og_id,
     s.nominal_species_id,
     v.validated_species_name,
-    dg.aws_assm,
     dg.biosample_accession,
     dg.bioproject_accession,
     dg.sra_accession,
