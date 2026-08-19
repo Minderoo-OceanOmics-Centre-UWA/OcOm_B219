@@ -4,8 +4,8 @@ Scripts for reporting data sharing status across Ocean Genomes: reference genome
 
 ## Layout
 
-- `run_combined_report.sh` — one-command entry point for the quarterly review (see [Combined report](#combined-report)).
-- `scripts/` — all source: the three per-type scripts, `queries.py`, `combined_upload_status.py`, `generate_html_report.py`, and `report_template.html`.
+- `run_combined_report.sh` 
+- `scripts/` 
 - `reports/` — generated output only (CSVs, the HTML report); `reports/archive/` accumulates a dated copy of every combined-report run for quarterly comparison.
 
 ---
