@@ -1,0 +1,674 @@
+<title>OG Upload Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #F5F7F5;
+    --surface: #FFFFFF;
+    --surface-2: #EDF1EF;
+    --ink: #16241F;
+    --ink-dim: #56645E;
+    --ink-faint: #8A968F;
+    --border: #D8E0DC;
+    --accent: #0B7A75;
+    --accent-ink: #FFFFFF;
+    --good: #2F9E5B;
+    --good-bg: #E3F3E8;
+    --warn: #B4780C;
+    --warn-bg: #FBF0DC;
+    --critical: #C24A3D;
+    --critical-bg: #FBE7E4;
+    --neutral: #8B96A0;
+    --neutral-bg: #EDF0F2;
+    --flag-stripe: #C24A3D;
+    --shadow: 0 1px 2px rgba(22,36,31,0.06), 0 4px 12px rgba(22,36,31,0.05);
+    --radius: 4px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0B1420;
+      --surface: #101C2B;
+      --surface-2: #16233380;
+      --ink: #DCE6E2;
+      --ink-dim: #8FA39C;
+      --ink-faint: #5E7069;
+      --border: #24354899;
+      --accent: #4FC3BE;
+      --accent-ink: #06201E;
+      --good: #4CAF6E;
+      --good-bg: #16301F80;
+      --warn: #E0A83A;
+      --warn-bg: #3A2C0E80;
+      --critical: #E2685A;
+      --critical-bg: #3A181480;
+      --neutral: #6B7680;
+      --neutral-bg: #1B2733;
+      --flag-stripe: #E2685A;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0B1420;
+    --surface: #101C2B;
+    --surface-2: #16233380;
+    --ink: #DCE6E2;
+    --ink-dim: #8FA39C;
+    --ink-faint: #5E7069;
+    --border: #24354899;
+    --accent: #4FC3BE;
+    --accent-ink: #06201E;
+    --good: #4CAF6E;
+    --good-bg: #16301F80;
+    --warn: #E0A83A;
+    --warn-bg: #3A2C0E80;
+    --critical: #E2685A;
+    --critical-bg: #3A181480;
+    --neutral: #6B7680;
+    --neutral-bg: #1B2733;
+    --flag-stripe: #E2685A;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 40px 28px 80px;
+  }
+
+  header.page-head {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 28px;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 500;
+    font-size: 34px;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+
+  .subhead {
+    color: var(--ink-dim);
+    font-size: 14.5px;
+    max-width: 65ch;
+  }
+
+  .subhead em {
+    font-family: "Newsreader", Georgia, serif;
+    font-style: italic;
+    color: var(--ink);
+  }
+
+  /* ---------- stat tiles ---------- */
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 28px 0 24px;
+  }
+
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+
+  .tile-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .tile-name {
+    font-family: "Newsreader", serif;
+    font-style: italic;
+    font-size: 17px;
+    color: var(--ink);
+  }
+
+  .tile-total {
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+
+  .tile-bar {
+    display: flex;
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--surface-2);
+    margin-bottom: 10px;
+  }
+
+  .tile-bar span { display: block; height: 100%; }
+
+  .tile-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .tile-legend .dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
+  }
+  .tile-legend b {
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .flag-tile {
+    background: var(--surface);
+    border: 1px solid var(--critical);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .flag-tile .num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--critical);
+    line-height: 1;
+  }
+  .flag-tile .label {
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    max-width: 22ch;
+  }
+
+  /* ---------- controls ---------- */
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    padding: 10px 0;
+    z-index: 5;
+  }
+
+  .search {
+    flex: 1 1 240px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+  }
+  .search svg { flex: none; color: var(--ink-faint); }
+  .search input {
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--ink);
+    font-family: "IBM Plex Sans", sans-serif;
+    font-size: 13.5px;
+    width: 100%;
+  }
+  .search input::placeholder { color: var(--ink-faint); }
+
+  button.chip {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink-dim);
+    padding: 8px 13px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: border-color .12s, color .12s, background .12s;
+  }
+  button.chip:hover { border-color: var(--ink-faint); color: var(--ink); }
+  button.chip.active {
+    background: var(--critical-bg);
+    border-color: var(--critical);
+    color: var(--critical);
+    font-weight: 600;
+  }
+
+  select.chip {
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2356645E' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 11px center;
+    padding-right: 30px;
+  }
+  select.chip.active { background-color: var(--critical-bg); border-color: var(--critical); color: var(--critical); font-weight: 600; }
+
+  button.chip:focus-visible, select.chip:focus-visible, input:focus-visible, th button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .count-note {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  /* ---------- table ---------- */
+
+  .table-shell {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .table-scroll { overflow-x: auto; }
+
+  table { border-collapse: collapse; width: 100%; min-width: 980px; }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--surface-2);
+    text-align: left;
+    padding: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  thead th button {
+    all: unset;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 14px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  thead th button:hover { color: var(--ink); }
+  thead th .arrow { opacity: 0; font-size: 9px; }
+  thead th.sorted .arrow { opacity: 1; color: var(--accent); }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    box-shadow: inset 3px 0 0 transparent;
+  }
+  tbody tr.flagged { box-shadow: inset 3px 0 0 var(--flag-stripe); }
+  tbody tr:hover { background: var(--surface-2); }
+  tbody tr:last-child { border-bottom: none; }
+
+  td {
+    padding: 9px 14px;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  td.og-id {
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  td.species {
+    font-family: "Newsreader", serif;
+    font-style: italic;
+    color: var(--ink-dim);
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  td.species.empty { font-style: normal; color: var(--ink-faint); }
+
+  td.embargo {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .pill.good { background: var(--good-bg); color: var(--good); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.critical { background: var(--critical-bg); color: var(--critical); }
+  .pill.neutral { background: var(--neutral-bg); color: var(--ink-faint); }
+  .pill .flag-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--critical);
+    flex: none;
+  }
+
+  .status-cell { display: flex; flex-direction: column; gap: 3px; }
+  .status-cell .flag-text {
+    font-size: 10.5px;
+    color: var(--critical);
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .empty-state {
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--ink-faint);
+    font-family: "Newsreader", serif;
+    font-style: italic;
+    font-size: 16px;
+  }
+
+  footer {
+    margin-top: 22px;
+    font-size: 12px;
+    color: var(--ink-faint);
+    font-family: "IBM Plex Mono", monospace;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="page-head">
+    <span class="eyebrow">OcOm_B219 &middot; Quarterly Review</span>
+    <h1>OG Upload Status</h1>
+  </header>
+
+  <section class="stats" id="stats"></section>
+
+  <div class="controls">
+    <label class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="q" type="text" placeholder="Search OG ID or species&hellip;" autocomplete="off">
+    </label>
+    <select id="embargoFilter" class="chip select">
+      <option value="">All</option>
+    </select>
+    <button class="chip" id="flagToggle" type="button">Flagged only</button>
+    <span class="count-note" id="countNote"></span>
+  </div>
+
+  <div class="table-shell">
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr id="headRow"></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty-state" id="emptyState" style="display:none;">No matching OGs.</div>
+  </div>
+
+  <footer>Generated from combined_upload_status.csv &middot; OcOm_B219/ncbi_upload_status</footer>
+
+</div>
+
+<script>
+const DATA = __DATA_JSON__;
+
+const COLS = [
+  { key: 'og_id', label: 'OG ID', kind: 'id' },
+  { key: 'species', label: 'Species', kind: 'species' },
+  { key: 'embargo_status', label: 'Embargo', kind: 'embargo' },
+  { key: 'draft', label: 'Draft', kind: 'status' },
+  { key: 'ref', label: 'Reference', kind: 'status' },
+  { key: 'mito', label: 'Mito', kind: 'status' },
+];
+
+// classify a status string into a semantic bucket for pill coloring
+function classify(type, status) {
+  if (!status) return 'neutral';
+  const s = status.toLowerCase();
+  if (s === 'all uploaded' || s.endsWith('uploaded') && !s.includes('pending') && !s.includes('needs')) {
+    if (type === 'ref' && (s.includes('pending') || s.includes('tobereleased'))) return 'warn';
+    return 'good';
+  }
+  if (s.includes('not registered')) return 'critical';
+  if (s.includes('needs uploading') || s === 'needs_uploading') return 'critical';
+  if (s.includes('pending') || s.includes('tobereleased') || s.includes('registered in sample')) return 'warn';
+  return 'neutral';
+}
+
+function rowFlagged(r) {
+  return !!(r.draft_data_quality_flag || r.ref_data_quality_flag || r.mito_data_quality_flag);
+}
+
+const state = { q: '', flaggedOnly: false, embargo: '', sortKey: 'og_id', sortDir: 1 };
+
+function populateEmbargoFilter() {
+  const sel = document.getElementById('embargoFilter');
+  const values = [...new Set(DATA.map(r => r.embargo_status).filter(Boolean))].sort();
+  values.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v;
+    sel.appendChild(opt);
+  });
+}
+
+function renderStats() {
+  const types = [
+    { key: 'draft', name: 'Draft' },
+    { key: 'ref', name: 'Reference' },
+    { key: 'mito', name: 'Mito' },
+  ];
+  const el = document.getElementById('stats');
+  el.innerHTML = '';
+
+  types.forEach(t => {
+    const withRecord = DATA.filter(r => r[t.key + '_upload_status']);
+    const counts = {};
+    withRecord.forEach(r => {
+      const s = r[t.key + '_upload_status'];
+      counts[s] = (counts[s] || 0) + 1;
+    });
+    const total = withRecord.length;
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    const bar = entries.map(([status, n]) => {
+      const cls = classify(t.key, status);
+      const pct = (n / total * 100).toFixed(2);
+      return `<span style="width:${pct}%;background:var(--${cls === 'neutral' ? 'ink-faint' : cls})"></span>`;
+    }).join('');
+    const legend = entries.map(([status, n]) => {
+      const cls = classify(t.key, status);
+      return `<span><span class="dot" style="background:var(--${cls === 'neutral' ? 'ink-faint' : cls})"></span>${status} <b>${n}</b></span>`;
+    }).join('');
+
+    tile.innerHTML = `
+      <div class="tile-head">
+        <span class="tile-name">${t.name}</span>
+        <span class="tile-total">${total} OG${total === 1 ? '' : 's'}</span>
+      </div>
+      <div class="tile-bar">${bar}</div>
+      <div class="tile-legend">${legend}</div>
+    `;
+    el.appendChild(tile);
+  });
+
+  const flaggedCount = DATA.filter(rowFlagged).length;
+  const flagTile = document.createElement('div');
+  flagTile.className = 'flag-tile';
+  flagTile.innerHTML = `
+    <span class="num">${flaggedCount}</span>
+    <span class="label">OGs with a data&nbsp;quality flag in at least one pipeline</span>
+  `;
+  el.appendChild(flagTile);
+}
+
+function renderHead() {
+  const tr = document.getElementById('headRow');
+  tr.innerHTML = '';
+  COLS.forEach(col => {
+    const th = document.createElement('th');
+    const sortable = col.kind !== 'embargo';
+    th.innerHTML = sortable
+      ? `<button type="button" data-key="${col.key}">${col.label}<span class="arrow">&#9650;</span></button>`
+      : `<button type="button" style="cursor:default">${col.label}</button>`;
+    tr.appendChild(th);
+  });
+  tr.querySelectorAll('button[data-key]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.key;
+      if (state.sortKey === key) state.sortDir *= -1;
+      else { state.sortKey = key; state.sortDir = 1; }
+      render();
+    });
+  });
+}
+
+function sortValue(r, key) {
+  if (key === 'og_id') {
+    const m = r.og_id.match(/^OG(\d+)/i);
+    return m ? parseInt(m[1], 10) : r.og_id;
+  }
+  if (key === 'species') return (r.species || '￿').toLowerCase();
+  if (['draft', 'ref', 'mito'].includes(key)) return (r[key + '_upload_status'] || '￿').toLowerCase();
+  return r[key] || '';
+}
+
+function pillHTML(type, status, flag) {
+  if (!status) return `<span class="pill neutral">&mdash;</span>`;
+  const cls = classify(type, status);
+  const dot = flag ? '<span class="flag-dot"></span>' : '';
+  return `
+    <div class="status-cell">
+      <span class="pill ${cls}">${dot}${status}</span>
+      ${flag ? `<span class="flag-text" title="${flag}">${flag}</span>` : ''}
+    </div>`;
+}
+
+function render() {
+  const q = state.q.trim().toLowerCase();
+  let rows = DATA.filter(r => {
+    if (state.flaggedOnly && !rowFlagged(r)) return false;
+    if (state.embargo && r.embargo_status !== state.embargo) return false;
+    if (!q) return true;
+    return r.og_id.toLowerCase().includes(q) || (r.species || '').toLowerCase().includes(q);
+  });
+
+  rows = rows.slice().sort((a, b) => {
+    const av = sortValue(a, state.sortKey), bv = sortValue(b, state.sortKey);
+    if (av < bv) return -1 * state.sortDir;
+    if (av > bv) return 1 * state.sortDir;
+    return 0;
+  });
+
+  document.querySelectorAll('#headRow th').forEach(th => th.classList.remove('sorted'));
+  const activeBtn = document.querySelector(`#headRow button[data-key="${state.sortKey}"]`);
+  if (activeBtn) {
+    activeBtn.closest('th').classList.add('sorted');
+    activeBtn.querySelector('.arrow').innerHTML = state.sortDir === 1 ? '&#9650;' : '&#9660;';
+  }
+
+  const tbody = document.getElementById('rows');
+  const empty = document.getElementById('emptyState');
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+  } else {
+    empty.style.display = 'none';
+    tbody.innerHTML = rows.map(r => {
+      const flagged = rowFlagged(r);
+      return `
+        <tr class="${flagged ? 'flagged' : ''}">
+          <td class="og-id">${r.og_id}</td>
+          <td class="species ${r.species ? '' : 'empty'}">${r.species || 'unvalidated'}</td>
+          <td class="embargo">${r.embargo_status || '&mdash;'}</td>
+          <td>${pillHTML('draft', r.draft_upload_status, r.draft_data_quality_flag)}</td>
+          <td>${pillHTML('ref', r.ref_upload_status, r.ref_data_quality_flag)}</td>
+          <td>${pillHTML('mito', r.mito_upload_status, r.mito_data_quality_flag)}</td>
+        </tr>`;
+    }).join('');
+  }
+
+  document.getElementById('countNote').textContent = `${rows.length} of ${DATA.length} OGs`;
+}
+
+document.getElementById('q').addEventListener('input', e => { state.q = e.target.value; render(); });
+document.getElementById('flagToggle').addEventListener('click', e => {
+  state.flaggedOnly = !state.flaggedOnly;
+  e.target.classList.toggle('active', state.flaggedOnly);
+  render();
+});
+document.getElementById('embargoFilter').addEventListener('change', e => {
+  state.embargo = e.target.value;
+  e.target.classList.toggle('active', !!state.embargo);
+  render();
+});
+
+renderStats();
+renderHead();
+populateEmbargoFilter();
+render();
+</script>
