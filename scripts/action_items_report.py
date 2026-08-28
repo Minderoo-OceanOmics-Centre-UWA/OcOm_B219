@@ -50,15 +50,10 @@ from queries import CLASSIFY, DRAFT_SQL, MITO_SQL, REF_SQL, TOLID_SQL, TYPES
 IN_PROGRESS_LABEL = {
     'draft': 'needs raw/assembly upload to NCBI',
     'ref': 'needs upload to NCBI',
-    # mito has no single label here -- its upload_status values ("ready to
-    # submit", "needs_uploading", "submitted, pending accession", "submission
-    # failed") are distinct, actionable states in their own right, so
-    # build_actions() below uses the raw value as the category instead.
 }
 
 TOLID_GENOME_TYPE = 'Reference genomes'
 
-# Reference -> Mitogenomes -> Draft, matching the PDF summary's appendix order.
 BLOCK_ORDER = ['Reference genomes', 'Mitogenomes', 'Draft genomes']
 
 
@@ -101,7 +96,7 @@ def build_actions(per_type_rows, tolid_rows):
             continue
         og_id = row['og_id']
         if action == 'needs species validation' and og_id in no_validation_ogs:
-            continue  # already reported via draft's data_quality_flag
+            continue
         species = row.get('validated_species_name') or row.get('nominal_species_id') or '-'
         actions.append((TOLID_GENOME_TYPE, action, og_id, species))
 

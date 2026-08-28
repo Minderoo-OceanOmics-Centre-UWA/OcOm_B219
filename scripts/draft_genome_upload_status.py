@@ -75,7 +75,6 @@ print(f"\nTotal: {len(rows)} OGs")
 for status, count in sorted(Counter(dict(zip(cols, r))['upload_status'] for r in rows).items()):
     print(f"  {status}: {count}")
 
-# --- Separate data quality issues report ---
 flag_idx = cols.index('data_quality_flag')
 flagged_rows = [r for r in rows if r[flag_idx]]
 

@@ -74,15 +74,10 @@ def main():
 
     all_og_ids = sorted(set().union(*(d.keys() for d in per_type.values())))
 
-    # One timestamp for the whole run, so every row in this report shares it —
-    # lets a saved CSV be compared against a later one (e.g. next quarter) even
-    # if the file gets renamed or merged with others down the line.
     generated_at = datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds')
 
     combined = []
     for og_id in all_og_ids:
-        # species/embargo_status should agree across types for the same OG; take
-        # whichever is present first (draft > ref > mito) as the shared display value.
         species = embargo_status = None
         for t in TYPES:
             rec = per_type[t].get(og_id)
@@ -110,7 +105,6 @@ def main():
         for row in combined:
             print('\t'.join('' if x is None else str(x) for x in row))
 
-    # --- Summary: per-type totals + upload_status breakdown ---
     print(f"\nTotal: {len(combined)} distinct OGs across draft/ref/mito")
     for t in TYPES:
         status_col = f'{t}_upload_status'
@@ -120,7 +114,6 @@ def main():
         for status, count in sorted(Counter(type_statuses).items()):
             print(f"    {status}: {count}")
 
-    # --- Combined data quality issues report: any OG flagged in any type ---
     flag_idxs = [COMBINED_COLS.index(f'{t}_data_quality_flag') for t in TYPES]
     flagged_rows = [row for row in combined if any(row[i] for i in flag_idxs)]
 

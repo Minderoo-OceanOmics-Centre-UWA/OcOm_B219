@@ -177,7 +177,6 @@ def render_pdf(current, previous, out_path):
     pdf.add_page()
     page_w = pdf.w - pdf.l_margin - pdf.r_margin
 
-    # --- Header ---
     pdf.set_font('Times', 'B', 21)
     pdf.set_text_color(*TEXT_RGB)
     pdf.cell(0, 9, 'OceanGenomes Upload Status', new_x='LMARGIN', new_y='NEXT')
@@ -200,7 +199,6 @@ def render_pdf(current, previous, out_path):
     pdf.cell(0, 5, note, new_x='LMARGIN', new_y='NEXT')
     pdf.ln(6)
 
-    # --- Totals: two bordered stat boxes ---
     total_delta = delta_str(current['summary']['total'], prev['total']) if prev else None
     uploaded_delta = delta_str(current['summary']['total_uploaded'], prev['total_uploaded']) if prev else None
 
@@ -233,7 +231,6 @@ def render_pdf(current, previous, out_path):
 
     pdf.set_y(y0 + box_h + 10)
 
-    # --- Per-type table ---
     col_type_w = 34
     col_w = (page_w - col_type_w) / 4
     row_h = 9
@@ -276,10 +273,6 @@ def render_pdf(current, previous, out_path):
         ly = pdf.get_y()
         pdf.line(x0, ly, x0 + page_w, ly)
 
-    # --- Uploaded OGs appendix (FYI) ---
-    # Two-column layout with manual pagination: fpdf2's auto page break only
-    # triggers correctly for straight top-to-bottom flows, not for cells we
-    # position ourselves with set_xy(), so we pre-check room before each row.
     pdf.set_auto_page_break(False)
 
     def ensure_room(h):
@@ -328,8 +321,6 @@ def render_pdf(current, previous, out_path):
 
         pdf.ln(3)
 
-    # --- Footer ---
-    # footer sits right at the bottom margin; auto page break already off above
     pdf.set_y(-20)
     pdf.set_draw_color(*BORDER_RGB)
     pdf.set_line_width(0.3)

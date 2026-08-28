@@ -1,25 +1,5 @@
 #!/bin/bash
-# Run the combined upload status report end-to-end: query the DB
-# (scripts/combined_upload_status.py), then build the action-items to-do
-# list (scripts/action_items_report.py) — one command instead of two.
-#
-# Output (CSV + data quality issues CSV + action-items CSV + summary PDF) is
-# written to reports/, outside the scripts/ directory. A dated copy of the
-# summary PDF is also saved to reports/archive/ on every run, so past
-# quarters aren't overwritten and can be compared against later — the PDF
-# embeds its own counts, so that's the only file that needs to be archived.
-#
-# Pass --check to skip the PDF/archive step and only refresh the CSVs — use
-# this for as-needed triage during the quarter, since it never touches
-# reports/archive/. Omit it for the official quarterly run whose PDF gets
-# archived and sent to management.
-#
-# Usage:
-#   bash run_combined_report.sh <config> [--check] [output.csv]
-#
-# Examples:
-#   bash run_combined_report.sh ~/postgresql_details/oceanomics.cfg --check
-#   bash run_combined_report.sh ~/postgresql_details/oceanomics.cfg
+# Usage: bash run_combined_report.sh <config> [--check] [output.csv]
 
 set -euo pipefail
 
@@ -59,8 +39,6 @@ if [ "$CHECK_ONLY" = true ]; then
 else
     echo
     echo "=== Step 3/3: building summary report -> $SUMMARY_PDF ==="
-    # Run before archiving this PDF below, so it finds and compares against the
-    # previously archived PDF rather than itself.
     python3 "$SRC_DIR/generate_summary_report.py" "$OUT_CSV" "$SUMMARY_PDF"
 
     STAMP="$(date +%Y%m%d_%H%M%S)"
