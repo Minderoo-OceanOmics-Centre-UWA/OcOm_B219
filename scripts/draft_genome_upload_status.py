@@ -6,22 +6,31 @@ latest seq_date, or the row matching an ilmn lca_validation record if one
 exists, for OGs with more than one draft_genomes record). No filters —
 every og_id in draft_genomes with a matching sample row is included.
 
-upload_status (checked top-down, first match wins):
-    all uploaded                     biosample_accession, bioproject_accession,
-                                      sra_accession, AND assembly_accession all
-                                      present and validly formatted.
-    raw uploaded, assembly pending   biosample/bioproject/sra_accession present,
+upload_status (checked top-down, first match wins; bioproject_accession is
+NOT checked — draft's two BioProjects are fixed constants, never written
+back per-OG, matching ENA-draft-genomes/00_create_draft_samplesheet.py):
+    all uploaded                     biosample_accession, sra_accession, AND
+                                      assembly_accession all present and
+                                      validly formatted (sra_accession
+                                      accepts SRR or ERR prefixes).
+    raw uploaded, assembly pending   biosample/sra_accession present,
                                       assembly_accession still NULL.
     raw+assembly needs uploading     catch-all: nothing registered yet, or any
                                       other partial state.
 
 data_quality_flag (informational, independent of upload_status; matches
-lca_validation against this record's seq_date, tech = ilmn):
-    no validated species name recorded    no lca_validation row at all has one.
+ENA-draft-genomes/00_create_draft_samplesheet.py's own checks, so an OG
+flagged clear here should pass that script's validation too):
+    no validated species name recorded    no lca_validation row at all has one
+                                           (matches this record's seq_date,
+                                           tech = ilmn).
     no ilmn validation matching seq_date  a validated name exists, but not from
                                            an ilmn row matching this seq_date —
                                            fell back to the latest overall.
     species mismatch: validated vs nominal   disagrees with sample.nominal_species_id.
+    missing ncbi_id                       sample.ncbi_id is blank — ENA's
+                                           mandatory TAXON_ID, a hard gate on
+                                           that pipeline's side.
 
 Full SQL + comments: queries.py (DRAFT_SQL).
 

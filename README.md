@@ -4,9 +4,9 @@ Scripts for reporting data sharing status across Ocean Genomes: reference genome
 
 ## Layout
 
-- `run_combined_report.sh` 
-- `scripts/` 
-- `reports/` — generated output only (CSVs, the HTML report); `reports/archive/` accumulates a dated copy of every combined-report run for quarterly comparison.
+- `run_combined_report.sh`
+- `scripts/`
+- `reports/` — generated output only; `reports/archive/` keeps a dated copy of the summary PDF from every run, for quarterly comparison.
 
 ---
 
@@ -20,31 +20,37 @@ Scripts for reporting data sharing status across Ocean Genomes: reference genome
 ## Usage
 
 ```bash
+# Triage during the quarter — CSVs + action items only:
+bash run_combined_report.sh ~/postgresql_details/oceanomics.cfg --check
+
+# Generate and archive each quarter report:
 bash run_combined_report.sh ~/postgresql_details/oceanomics.cfg
 ```
 
-Writes `og_status.csv`, `og_status_flagged.csv`, and `og_status_report.html` to `reports/`. A dated copy of both CSVs is also saved to `reports/archive/` on every run (e.g. `og_status_20260819_160501.csv`).Open the HTML file in a browser to view the report.
+Both write to `reports/`:
+- `og_status.csv` / `og_status_flagged.csv` — full per-OG data.
+- `og_status_action_items.txt` — a to-do list grouped by genome type then action category (e.g. "needs NCBI taxon ID", "needs ToLID request"), with the OGs needing each action listed underneath. Full category list: each `data_quality_flag` in `scripts/queries.py`.
+
+`--check` is safe to re-run as often as you like — it never touches `reports/archive/`.
 
 ---
 
 ## Individual per-type scripts
 
-Use these instead of the combined report when you need full per-type detail (e.g. ref genome haplotype/SRA columns, draft accession columns) — the combined view only carries the normalized status/flag columns.
+For full per-type detail the combined report normalizes away (e.g. ref haplotype/SRA columns):
 
 ```bash
 singularity run $SING/psycopg2:0.1.sif python scripts/<script.py> \
     ~/postgresql_details/oceanomics.cfg
 ```
 
-Writes `<type>_status_<YYYYMMDD_HHMMSS>.csv` (the full report) and `<type>_status_<YYYYMMDD_HHMMSS>_data_quality_issues.csv` (same rows, filtered to a non-empty `data_quality_flag`) to `reports/`.
-
 | Script | Reports on |
 |---|---|
-| `ref_genome_upload_status.py` | Reference genomes upload status |
-| `draft_genome_upload_status.py` | Draft genomes upload status |
-| `mitogenome_upload_status.py` | Mitogenomes upload status |
+| `ref_genome_upload_status.py` | Reference genomes |
+| `draft_genome_upload_status.py` | Draft genomes |
+| `mitogenome_upload_status.py` | Mitogenomes |
 
-Each script's own docstring documents its exact `upload_status` and `data_quality_flag` values; the full SQL (with inline comments) lives in `scripts/queries.py`.
+Each writes a timestamped CSV + flagged-only CSV to `reports/`. Exact `upload_status`/`data_quality_flag` values are documented in each script's own docstring; full SQL lives in `scripts/queries.py`.
 
 ---
 
@@ -52,10 +58,10 @@ Each script's own docstring documents its exact `upload_status` and `data_qualit
 
 | Table | Description |
 |-------|-------------|
-| `ref_genomes_assembly_uploads` | NCBI BioProject and assembly accessions per reference genome OG |
-| `ref_genomes_sra_uploads` | SRR accessions and release status per sequencing run |
-| `ref_genomes` | Assembly quality metrics and stage |
+| `ref_genomes_assembly_uploads` / `ref_genomes_sra_uploads` / `ref_genomes` | Reference genome accessions, SRA status, and stage |
 | `draft_genomes` | Draft genome assembly metrics and NCBI accessions |
-| `mitogenome_data` | Mitogenome assembly records and GenBank accessions |
+| `mitogenome_data` | Mitogenome assembly records (identity/QC fields only — `genbank_accession` is dead, no longer written) |
+| `ena_validation_attempts` | Flatfile format validation per mitogenome assembly (drives `ready to submit`) |
+| `ena_submissions` | Actual ENA submission ledger for mitogenomes (drives `submitted, ...` statuses) |
 | `lca_validation` | Validated species names per OG |
 | `sample` | Sample metadata, workflow, and embargo status |

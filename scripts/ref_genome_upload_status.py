@@ -23,11 +23,23 @@ upload_status is either a fixed value, or a composite of up to three parts
     raw data pending                  rawdata BioProject registered, no SRR yet.
 
 data_quality_flag (informational, independent of upload_status; matches
-lca_validation against the stage-3 seq_date, preferring hifi over hic):
+lca_validation against the stage-3 seq_date, preferring hifi over hic; also
+matches ENA-ref-genomes/00_pull_ready_to_upload_samples.py's own checks —
+note that script treats several of these as HARD exclusions rather than
+just flags, so an OG flagged here may be rejected there even though it
+still shows up in this report):
     no hifi/hic validation matching stage-3 seq_date   fell back to the latest
                                                         validated record overall.
     species mismatch: validated vs nominal             disagrees with
                                                         sample.nominal_species_id.
+    validated via hic only (ENA pipeline requires hifi)   the matched validation
+                                                        came from a hic row, not
+                                                        hifi — that pipeline only
+                                                        ever accepts tech='hifi'.
+    hap1/hap2 stage-3 seq_date inconsistent             the OG's stage-3
+                                                        ref_genomes rows don't
+                                                        all share the same
+                                                        seq_date.
 
 Full SQL + comments: queries.py (REF_SQL).
 

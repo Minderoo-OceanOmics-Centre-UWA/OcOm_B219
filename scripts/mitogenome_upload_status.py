@@ -1,24 +1,41 @@
 #!/usr/bin/env python3
 """Mitogenome upload status report.
 
-Reports GenBank upload status for mitogenomes, one row per OG using the
+Reports ENA submission status for mitogenomes, one row per OG using the
 best available sequencing technology (priority: hifi > hic > ilmn).
 Filters: excludes "_concat" OG IDs, deduplicates to the most recent record
 per OG + technology, selects one technology per OG by priority.
 
-upload_status:
-    <tech> uploaded    genbank_accession present for the chosen technology,
-                       e.g. "hifi uploaded".
-    needs_uploading    no genbank_accession yet.
+upload_status (based on ena_validation_attempts/ena_submissions, not the
+dead mitogenome_data.genbank_accession column):
+    submitted, accession assigned    ena_submissions has an ACCESSION_ASSIGNED
+                                      row (production mode) for this exact
+                                      assembly+annotation.
+    submitted, pending accession     ena_submissions row is SUBMITTED.
+    submission failed                ena_submissions row is FAILED.
+    ready to submit                  no submission yet, but the flatfile has
+                                      cleared every format-validation gate
+                                      the Mitogenomes pipeline runs
+                                      (ena_validation_attempts.submission_ready).
+    needs_uploading                  catch-all: not yet submission_ready.
 
 data_quality_flag (informational, independent of upload_status; matches
-lca_validation against this record's seq_date and its chosen technology):
+lca_validation against this record's seq_date and its chosen technology;
+also matches ENA-mito-genomes/00_create_mito_samplesheet.py's own not-ready
+reasons where applicable):
     no validated species name recorded      no lca_validation row at all has one.
     no <tech> validation matching seq_date  a validated name exists, but not
                                              from a row matching the OG's chosen
                                              technology AND seq_date — fell back
                                              to the latest overall.
     species mismatch: validated vs nominal  disagrees with sample.nominal_species_id.
+    missing ncbi_id                         sample.ncbi_id is blank — no
+                                             BioSample can be created without
+                                             it. Checked independently of
+                                             TOLID_SQL, since mitogenomes
+                                             assembled via hic/ilmn (not hifi)
+                                             never appear in TOLID_SQL's
+                                             sample.hifi='Y' population.
 
 Full SQL + comments: queries.py (MITO_SQL).
 

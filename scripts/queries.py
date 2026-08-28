@@ -4,7 +4,38 @@ Single source of truth for the draft/ref/mito status queries, imported by
 the three standalone scripts (draft_genome_upload_status.py,
 ref_genome_upload_status.py, mitogenome_upload_status.py) and by
 combined_upload_status.py, so the logic only ever lives in one place.
+
+Also holds TYPES/CLASSIFY: the shared "which upload_status values count as
+actually uploaded" logic, used by both generate_summary_report.py and
+action_items_report.py so the definition of "uploaded" only lives here.
 """
+
+TYPES = [
+    ('draft', 'Draft genomes'),
+    ('ref', 'Reference genomes'),
+    ('mito', 'Mitogenomes'),
+]
+
+
+def classify_draft(s):
+    if not s:
+        return 'no_record'
+    return 'uploaded' if s == 'all uploaded' else 'in_progress'
+
+
+def classify_ref(s):
+    if not s:
+        return 'no_record'
+    return 'uploaded' if s == 'all uploaded' else 'in_progress'
+
+
+def classify_mito(s):
+    if not s:
+        return 'no_record'
+    return 'uploaded' if s == 'submitted, accession assigned' else 'in_progress'
+
+
+CLASSIFY = {'draft': classify_draft, 'ref': classify_ref, 'mito': classify_mito}
 
 DRAFT_SQL = """
 /* -----------------------------------------------------------
@@ -16,20 +47,25 @@ DRAFT_SQL = """
    falls back to the latest seq_date only if none of the OG's
    rows have a matching validation.
 
-   Upload status logic:
-   - 'all uploaded'                  biosample_accession, bioproject_accession,
-                                      sra_accession, AND assembly_accession all
-                                      present and validly formatted.
+   Upload status logic (bioproject_accession is NOT checked -- per
+   ENA-draft-genomes' own comment, draft's two BioProjects are fixed
+   constants, never written back per-OG, so requiring one here would be a
+   stricter check than the real pipeline and produce false negatives):
+   - 'all uploaded'                  biosample_accession, sra_accession, AND
+                                      assembly_accession all present and
+                                      validly formatted.
    - 'raw uploaded, assembly
-      pending'                       biosample_accession, bioproject_accession,
-                                      AND sra_accession present, but
-                                      assembly_accession still NULL.
+      pending'                       biosample_accession AND sra_accession
+                                      present, but assembly_accession still
+                                      NULL.
    - 'raw+assembly needs
       uploading'                     catch-all: covers both "nothing
                                       registered yet" (all four fields NULL)
                                       and any other partial state.
 
-   data_quality_flag (informational, does not affect upload_status):
+   data_quality_flag (informational, does not affect upload_status; matches
+   ENA-draft-genomes/00_create_draft_samplesheet.py's own checks, so an OG
+   flagged clear here should pass that script's validation too):
    - 'no validated species name
       recorded'                     no lca_validation row at all has a
                                       validated_species_name for this og_id.
@@ -42,6 +78,10 @@ DRAFT_SQL = """
    - 'species mismatch: validated
       vs nominal'                   validated_species_name disagrees with
                                       sample.nominal_species_id.
+   - 'missing ncbi_id'              sample.ncbi_id is blank -- ENA's
+                                      mandatory TAXON_ID, a hard gate on
+                                      that pipeline's side (no BioSample/
+                                      BioProject possible without it).
 ----------------------------------------------------------- */
 WITH validation_match AS (
     SELECT DISTINCT dg.og_id, dg.seq_date
@@ -102,17 +142,16 @@ SELECT
         CASE WHEN v.used_fallback THEN 'no ilmn validation matching seq_date' END,
         CASE WHEN NOT v.no_validation
               AND v.validated_species_name IS DISTINCT FROM s.nominal_species_id
-             THEN 'species mismatch: validated vs nominal' END
+             THEN 'species mismatch: validated vs nominal' END,
+        CASE WHEN NULLIF(s.ncbi_id::text, '') IS NULL THEN 'missing ncbi_id' END
     ) AS data_quality_flag,
     CASE
       WHEN (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
-       AND (dg.bioproject_accession IS NOT NULL AND dg.bioproject_accession ~* '^PRJ')
-       AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^SRR')
+       AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^(SRR|ERR)')
        AND NULLIF(dg.assembly_accession, '') IS NOT NULL
         THEN 'all uploaded'
       WHEN (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
-       AND (dg.bioproject_accession IS NOT NULL AND dg.bioproject_accession ~* '^PRJ')
-       AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^SRR')
+       AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^(SRR|ERR)')
        AND NULLIF(dg.assembly_accession, '') IS NULL
         THEN 'raw uploaded, assembly pending'
       ELSE 'raw+assembly needs uploading'
@@ -159,7 +198,11 @@ REF_SQL = """
                              started upstream but hasn't synced to
                              ref_genomes_assembly_uploads yet.
 
-   data_quality_flag (informational, does not affect upload_status):
+   data_quality_flag (informational, does not affect upload_status; matches
+   ENA-ref-genomes/00_pull_ready_to_upload_samples.py's own checks -- note
+   that script treats several of these as HARD exclusions rather than just
+   flags, so an OG flagged here may be rejected there even though it still
+   shows up in this report):
    - 'no hifi/hic validation
       matching stage-3 seq_date'  the preferred validated_species_name
                              (from a hifi/hic lca_validation row whose
@@ -170,11 +213,31 @@ REF_SQL = """
    - 'species mismatch:
       validated vs nominal'  validated_species_name disagrees with
                              sample.nominal_species_id.
+   - 'validated via hic only
+      (ENA pipeline requires
+      hifi)'                  the matched validation came from a hic row,
+                             not hifi -- that pipeline's own query only
+                             ever accepts tech='hifi', no hic fallback,
+                             so it would reject this OG even though this
+                             report treats hic as acceptable evidence.
+   - 'hap1/hap2 stage-3
+      seq_date inconsistent' the OG's stage-3 ref_genomes rows don't all
+                             share the same seq_date -- that pipeline
+                             hard-excludes on this (stage3_seq_date_
+                             inconsistent); here it just means the exact-
+                             match check above may have silently matched
+                             whichever seq_date happened to line up.
 ----------------------------------------------------------- */
 WITH rg3 AS (
     SELECT DISTINCT og_id, seq_date
     FROM ref_genomes
     WHERE stage = 3
+),
+stage3_seqdates AS (
+    SELECT og_id, MIN(seq_date) AS min_seq_date, MAX(seq_date) AS max_seq_date
+    FROM ref_genomes
+    WHERE stage = 3
+    GROUP BY og_id
 ),
 matched AS (
     SELECT DISTINCT ON (lv.og_id)
@@ -258,7 +321,11 @@ SELECT
     CONCAT_WS(', ',
         CASE WHEN v.used_fallback THEN 'no hifi/hic validation matching stage-3 seq_date' END,
         CASE WHEN v.validated_species_name IS DISTINCT FROM s.nominal_species_id
-             THEN 'species mismatch: validated vs nominal' END
+             THEN 'species mismatch: validated vs nominal' END,
+        CASE WHEN NOT v.used_fallback AND v.tech = 'hic'
+             THEN 'validated via hic only (ENA pipeline requires hifi)' END,
+        CASE WHEN sd.min_seq_date IS DISTINCT FROM sd.max_seq_date
+             THEN 'hap1/hap2 stage-3 seq_date inconsistent' END
     ) AS data_quality_flag,
     CASE
         WHEN u.og_id IS NULL
@@ -297,6 +364,8 @@ LEFT JOIN ref_genomes_assembly_uploads u
     ON u.og_id = v.og_id
 LEFT JOIN sra_summary ss
     ON ss.og_id = v.og_id
+LEFT JOIN stage3_seqdates sd
+    ON sd.og_id = v.og_id
 WHERE EXISTS (
     SELECT 1 FROM ref_genomes r
     WHERE r.og_id = v.og_id AND r.stage = 3
@@ -313,12 +382,35 @@ MITO_SQL = """
    hifi > hic > ilmn) and its latest assembly attempt (seq_date and code), matched
    to a sample record for embargo_status.
 
-   Upload status logic:
-   - '<tech> uploaded'   genbank_accession present for the
-                         chosen technology, e.g. 'hifi uploaded'.
-   - 'needs_uploading'   no genbank_accession yet.
+   Upload status logic (Nov 2026): based on the Oceanomics-OceanGenomes-
+   Mitogenomes pipeline's actual current output, NOT mitogenome_data
+   .genbank_accession -- confirmed by reading that pipeline's source that no
+   code path writes that column any more (it predates the pipeline; the
+   column is being phased out in favour of the tables below, per that
+   pipeline's own docs/ena_submission_handoff.md).
+   - 'submitted, accession
+      assigned'          ena_submissions.submission_status = 'ACCESSION_ASSIGNED'
+                         for this exact assembly+annotation (production mode)
+                         -- an ENA GCA/OU/LR accession exists.
+   - 'submitted, pending
+      accession'         ena_submissions.submission_status = 'SUBMITTED' --
+                         sent to ENA, accession not back yet.
+   - 'submission failed'  ena_submissions.submission_status = 'FAILED'.
+   - 'ready to submit'    no ena_submissions row yet, but the flatfile has
+                         cleared every gate the Mitogenomes pipeline runs
+                         (table2asn + EMBL conversion + Webin format
+                         validation) -- ena_validation_attempts
+                         .submission_ready = true for this exact
+                         assembly+annotation.
+   - 'needs_uploading'   catch-all: assembly/annotation exists but hasn't
+                         reached submission_ready yet (still being
+                         assembled, annotated, or QC'd).
+   Note: submission_ready is a FORMAT check only -- it says nothing about
+   species validation, which is tracked separately below.
 
-   data_quality_flag (informational, does not affect upload_status):
+   data_quality_flag (informational, does not affect upload_status; matches
+   ENA-mito-genomes/00_create_mito_samplesheet.py's own not-ready reasons
+   where applicable):
    - 'no validated species name
       recorded'          no lca_validation row at all has a
                          validated_species_name for this og_id.
@@ -330,6 +422,12 @@ MITO_SQL = """
    - 'species mismatch: validated
       vs nominal'         validated_species_name disagrees with
                          sample.nominal_species_id.
+   - 'missing ncbi_id'   sample.ncbi_id is blank -- that pipeline's own
+                         "missing ncbi_id" not-ready reason (no BioSample
+                         can be created without it). Checked here
+                         independently of TOLID_SQL, since mitogenomes
+                         assembled via hic/ilmn (not hifi) never appear
+                         in TOLID_SQL's sample.hifi='Y' population.
 ----------------------------------------------------------- */
 WITH base AS (
   SELECT
@@ -338,9 +436,11 @@ WITH base AS (
       m.tech,
       m.seq_date,
       m.code,
+      m.annotation,
       m.genbank_accession,
       s.embargo_status,
       s.nominal_species_id,
+      s.ncbi_id,
       CASE
         WHEN m.genbank_accession IS NOT NULL
              AND BTRIM(m.genbank_accession) <> '' THEN 1
@@ -430,19 +530,103 @@ SELECT
   pk.code,
   pk.genbank_accession,
   pk.embargo_status,
+  pk.nominal_species_id,
   v.validated_species_name,
   CONCAT_WS(', ',
       CASE WHEN v.no_validation THEN 'no validated species name recorded' END,
       CASE WHEN v.used_fallback THEN 'no ' || LOWER(pk.chosen_tech) || ' validation matching seq_date' END,
       CASE WHEN NOT v.no_validation
             AND v.validated_species_name IS DISTINCT FROM pk.nominal_species_id
-           THEN 'species mismatch: validated vs nominal' END
+           THEN 'species mismatch: validated vs nominal' END,
+      CASE WHEN NULLIF(pk.ncbi_id::text, '') IS NULL THEN 'missing ncbi_id' END
   ) AS data_quality_flag,
   CASE
-    WHEN pk.has_accession = 1 THEN LOWER(pk.chosen_tech) || ' uploaded'
+    WHEN es.submission_status = 'ACCESSION_ASSIGNED' THEN 'submitted, accession assigned'
+    WHEN es.submission_status = 'SUBMITTED' THEN 'submitted, pending accession'
+    WHEN es.submission_status = 'FAILED' THEN 'submission failed'
+    WHEN ev.submission_ready THEN 'ready to submit'
     ELSE 'needs_uploading'
   END AS upload_status
 FROM picked pk
 LEFT JOIN validated v ON v.og_id = pk.og_id
+LEFT JOIN ena_validation_latest ev
+  ON ev.og_id = pk.og_id AND ev.tech = pk.tech AND ev.seq_date = pk.seq_date
+ AND ev.code = pk.code AND ev.annotation = pk.annotation
+LEFT JOIN ena_submissions es
+  ON es.og_id = pk.og_id AND es.tech = pk.tech AND es.seq_date = pk.seq_date
+ AND es.code = pk.code AND es.annotation = pk.annotation AND es.webin_mode = 'production'
 ORDER BY pk.og_id
+"""
+
+TOLID_SQL = """
+/* -----------------------------------------------------------
+   ToLID / NCBI taxon readiness (OcOm_SOP_B231 pre-check)
+
+   Scope: every OG whose sample underwent HiFi sequencing
+   (sample.hifi = 'Y'), regardless of ref_genomes.stage. This is
+   deliberately broader than REF_SQL's stage-3-only scope, since
+   B231's own ToLID request trigger is HiFi-sequenced + validated,
+   not "already assembled" -- REF_SQL alone would miss pre-stage-3
+   candidates.
+
+   action_needed logic (first match wins; NULL if fully ready):
+   - 'needs species validation'  no lca_validation row (any tech)
+                                  has a validated_species_name for
+                                  this og_id yet.
+   - 'needs NCBI taxon ID'       a validated species name exists
+                                  (any tech), but sample.ncbi_id is
+                                  blank -- hasn't been looked up yet.
+   - 'NCBI taxon ID not exist'   sample.ncbi_id holds a non-numeric
+                                  placeholder (e.g. the literal
+                                  'not found') -- it WAS looked up,
+                                  but NCBI Taxonomy has no entry for
+                                  this species, which needs different
+                                  follow-up than a plain lookup.
+   - 'needs ToLID request'       a HiFi-tech validated species name
+                                  exists specifically (matching
+                                  B231's HiFi-specific trigger) and
+                                  ncbi_id is a real numeric taxon ID,
+                                  but sample.tol_id is still blank.
+
+   Note: two-validator sign-off (lca_validation.validator /
+   validator_2) is intentionally NOT checked here -- OcOm_SOP_B231's
+   own procedure already confirms sign-off as part of actually
+   submitting the request, so pre-flagging it here would just
+   duplicate that check.
+----------------------------------------------------------- */
+WITH any_validated AS (
+    SELECT DISTINCT ON (og_id)
+        og_id, validated_species_name
+    FROM lca_validation
+    WHERE validated_species_name IS NOT NULL AND validated_species_name <> ''
+    ORDER BY og_id, row_created_on DESC
+),
+hifi_validated AS (
+    SELECT DISTINCT ON (og_id)
+        og_id, validated_species_name
+    FROM lca_validation
+    WHERE tech = 'hifi'
+      AND validated_species_name IS NOT NULL AND validated_species_name <> ''
+    ORDER BY og_id, row_created_on DESC
+)
+SELECT
+    s.og_id,
+    s.nominal_species_id,
+    s.embargo_status,
+    av.validated_species_name,
+    hv.validated_species_name AS hifi_validated_species_name,
+    s.ncbi_id,
+    s.tol_id,
+    CASE
+        WHEN av.validated_species_name IS NULL THEN 'needs species validation'
+        WHEN NULLIF(s.ncbi_id, '') IS NULL THEN 'needs NCBI taxon ID'
+        WHEN s.ncbi_id !~ '^[0-9]+(\.0)?$' THEN 'NCBI taxon ID not exist'
+        WHEN hv.validated_species_name IS NOT NULL AND NULLIF(s.tol_id, '') IS NULL
+            THEN 'needs ToLID request'
+    END AS action_needed
+FROM sample s
+LEFT JOIN any_validated av ON av.og_id = s.og_id
+LEFT JOIN hifi_validated hv ON hv.og_id = s.og_id
+WHERE s.hifi = 'Y'
+ORDER BY s.og_id
 """
