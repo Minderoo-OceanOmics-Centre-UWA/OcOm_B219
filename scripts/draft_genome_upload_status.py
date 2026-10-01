@@ -10,11 +10,17 @@ upload_status (checked top-down, first match wins; bioproject_accession is
 NOT checked — draft's two BioProjects are fixed constants, never written
 back per-OG, matching ENA-draft-genomes/00_create_draft_samplesheet.py):
     all uploaded                     biosample_accession, sra_accession, AND
-                                      assembly_accession all present and
-                                      validly formatted (sra_accession
-                                      accepts SRR or ERR prefixes).
-    raw uploaded, assembly pending   biosample/sra_accession present,
-                                      assembly_accession still NULL.
+                                      assembly_accession (the public GCA_) all
+                                      present and validly formatted
+                                      (sra_accession accepts SRR or ERR).
+    submitted, awaiting GCA          biosample/sra_accession present and the
+                                      assembly has an ERZ in
+                                      ena_analysis_accession, but ENA has not
+                                      yet issued its public GCA_ — that arrives
+                                      hours to days later and is filled in by
+                                      resolve_gca_accessions.py.
+    raw uploaded, assembly pending   biosample/sra_accession present, no
+                                      assembly submitted at all.
     raw+assembly needs uploading     catch-all: nothing registered yet, or any
                                       other partial state.
 

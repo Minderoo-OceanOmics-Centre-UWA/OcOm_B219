@@ -6,17 +6,20 @@ best available sequencing technology (priority: hifi > hic > ilmn).
 Filters: excludes "_concat" OG IDs, deduplicates to the most recent record
 per OG + technology, selects one technology per OG by priority.
 
-upload_status (based on ena_validation_attempts/ena_submissions, not the
+upload_status (based on ena_validation_latest/ena_submissions, not the
 dead mitogenome_data.genbank_accession column):
+    submitted, public                ena_submissions.ena_assembly_accession
+                                      holds the public GCA_ accession.
     submitted, accession assigned    ena_submissions has an ACCESSION_ASSIGNED
                                       row (production mode) for this exact
-                                      assembly+annotation.
-    submitted, pending accession     ena_submissions row is SUBMITTED.
+                                      assembly+annotation, but no GCA yet.
     submission failed                ena_submissions row is FAILED.
+    not submitted                    ena_submissions row is NOT_SUBMITTED (no
+                                      receipt.xml was found on disk).
     ready to submit                  no submission yet, but the flatfile has
                                       cleared every format-validation gate
                                       the Mitogenomes pipeline runs
-                                      (ena_validation_attempts.submission_ready).
+                                      (ena_validation_latest.submission_ready).
     needs_uploading                  catch-all: not yet submission_ready.
 
 data_quality_flag (informational, independent of upload_status; matches

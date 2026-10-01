@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Reference genome upload status report.
 
-Reports NCBI upload status for reference genomes at assembly stage 3.
-Filters: OGs with a validated species name in lca_validation (deduplicated
-to the most recent record per OG) and a stage 3 entry in ref_genomes.
+Reports upload status for reference genomes at assembly stage 3. Every OG with
+a stage-3 entry in ref_genomes is included, whether or not it has a validated
+species name — a missing validation is reported as a data_quality_flag rather
+than dropping the OG from the report.
+
+An accession existing means the data is submitted. Release state (public vs
+embargoed) is reported alongside, never as a precondition — ncbi_status carries
+three vocabularies at once ('Released', 'ToBeReleased', and a bare holdUntilDate
+written by the ENA pipeline), normalised in queries.py's RELEASE_STATE_SQL.
 
 upload_status is either a fixed value, or a composite of up to three parts
 (hap1 status, hap2 status, raw data status) joined with ", ":
@@ -13,29 +19,31 @@ upload_status is either a fixed value, or a composite of up to three parts
     registered in sample, pending sync   no entry yet, but a sample column does
                                        (registration started upstream, hasn't
                                        synced down).
-    all uploaded                      both haplotype assembly accessions (JBXXXX)
-                                       present AND at least one SRR released.
+    all uploaded, public              both haplotypes have a public GCA_
+                                       accession AND raw data is submitted.
+    all uploaded                      both haplotype assembly accessions (ERZ)
+                                       present AND raw data is submitted.
+    hap1/hap2 public                  a public GCA_ accession is recorded.
     hap1/hap2 uploaded / pending      assembly accession assigned / BioProject
                                        registered but no assembly accession yet.
-    raw data <status>                 all known SRR statuses for the OG agree.
-    raw <type> <status>, ...          SRR statuses differ across data types,
+    raw data <state>                  all known SRR release states agree.
+    raw <type> <state>, ...           release states differ across data types,
                                        listed separately.
     raw data pending                  rawdata BioProject registered, no SRR yet.
+    raw data not submitted            no SRR rows at all.
 
 data_quality_flag (informational, independent of upload_status; matches
-lca_validation against the stage-3 seq_date, preferring hifi over hic; also
-matches ENA-ref-genomes/00_pull_ready_to_upload_samples.py's own checks —
-note that script treats several of these as HARD exclusions rather than
-just flags, so an OG flagged here may be rejected there even though it
-still shows up in this report):
-    no hifi/hic validation matching stage-3 seq_date   fell back to the latest
-                                                        validated record overall.
+lca_validation against the stage-3 seq_date for hifi, and on any date for hic,
+mirroring ENA-ref-genomes/00_pull_ready_to_upload_samples.py — Hi-C is often
+resequenced long after the assembly. Note that script treats several of these
+as HARD exclusions rather than just flags, so an OG flagged here may be
+rejected there even though it still shows up in this report):
+    no validated species name recorded      no lca_validation row at all has one.
+    no hifi/hic validation for this assembly   a validated name exists, but not
+                                                from an acceptable hifi/hic row —
+                                                fell back to the latest overall.
     species mismatch: validated vs nominal             disagrees with
                                                         sample.nominal_species_id.
-    validated via hic only (ENA pipeline requires hifi)   the matched validation
-                                                        came from a hic row, not
-                                                        hifi — that pipeline only
-                                                        ever accepts tech='hifi'.
     hap1/hap2 stage-3 seq_date inconsistent             the OG's stage-3
                                                         ref_genomes rows don't
                                                         all share the same

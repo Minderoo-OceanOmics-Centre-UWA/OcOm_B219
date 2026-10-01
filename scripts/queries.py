@@ -17,25 +17,57 @@ TYPES = [
 ]
 
 
+DRAFT_UPLOADED = ('all uploaded', 'submitted, awaiting GCA')
+REF_UPLOADED = ('all uploaded', 'all uploaded, public')
+MITO_UPLOADED = ('submitted, accession assigned', 'submitted, public')
+
+
 def classify_draft(s):
     if not s:
         return 'no_record'
-    return 'uploaded' if s == 'all uploaded' else 'in_progress'
+    return 'uploaded' if s in DRAFT_UPLOADED else 'in_progress'
 
 
 def classify_ref(s):
     if not s:
         return 'no_record'
-    return 'uploaded' if s == 'all uploaded' else 'in_progress'
+    return 'uploaded' if s in REF_UPLOADED else 'in_progress'
 
 
 def classify_mito(s):
     if not s:
         return 'no_record'
-    return 'uploaded' if s == 'submitted, accession assigned' else 'in_progress'
+    return 'uploaded' if s in MITO_UPLOADED else 'in_progress'
 
 
 CLASSIFY = {'draft': classify_draft, 'ref': classify_ref, 'mito': classify_mito}
+
+# The public/GCA-bearing status per type, counted separately from "uploaded" so the
+# headline number stays comparable with previously archived reports.
+PUBLIC_STATUS = {
+    'draft': 'all uploaded',
+    'ref': 'all uploaded, public',
+    'mito': 'submitted, public',
+}
+
+# ref_genomes_sra_uploads.ncbi_status carries three vocabularies at once: the NCBI-era
+# 'Released'/'ToBeReleased' labels, and a bare holdUntilDate written by the ENA pipeline's
+# step 09. An accession existing means the data is submitted; this column is only about
+# whether it has gone public yet.
+RELEASE_STATE_SQL = """
+        CASE
+            WHEN NULLIF(BTRIM(ncbi_status), '') IS NULL THEN 'unknown'
+            WHEN ncbi_status = 'Released' THEN 'public'
+            WHEN ncbi_status = 'ToBeReleased' THEN 'embargoed'
+            WHEN ncbi_status ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                THEN CASE
+                        WHEN TO_DATE(SUBSTRING(ncbi_status FROM 1 FOR 10), 'YYYY-MM-DD') <= CURRENT_DATE
+                            THEN 'public'
+                        ELSE 'embargoed'
+                     END
+            ELSE 'unknown'
+        END
+"""
 
 DRAFT_SQL = """
 WITH validation_match AS (
@@ -90,6 +122,7 @@ SELECT
     dg.biosample_accession,
     dg.bioproject_accession,
     dg.sra_accession,
+    dg.ena_analysis_accession,
     dg.assembly_accession,
     s.embargo_status,
     CONCAT_WS(', ',
@@ -100,6 +133,7 @@ SELECT
              THEN 'species mismatch: validated vs nominal' END,
         CASE WHEN NULLIF(s.ncbi_id::text, '') IS NULL THEN 'missing ncbi_id' END
     ) AS data_quality_flag,
+    (dg.sra_accession IS NOT NULL AND dg.sra_accession ~* '^(SRR|ERR)') AS raw_submitted,
     CASE
       WHEN (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
        AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^(SRR|ERR)')
@@ -107,7 +141,10 @@ SELECT
         THEN 'all uploaded'
       WHEN (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
        AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^(SRR|ERR)')
-       AND NULLIF(dg.assembly_accession, '') IS NULL
+       AND NULLIF(dg.ena_analysis_accession, '') IS NOT NULL
+        THEN 'submitted, awaiting GCA'
+      WHEN (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
+       AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^(SRR|ERR)')
         THEN 'raw uploaded, assembly pending'
       ELSE 'raw+assembly needs uploading'
     END AS upload_status
@@ -123,12 +160,17 @@ WITH rg3 AS (
     FROM ref_genomes
     WHERE stage = 3
 ),
+stage3_ogs AS (
+    SELECT DISTINCT og_id FROM ref_genomes WHERE stage = 3
+),
 stage3_seqdates AS (
     SELECT og_id, MIN(seq_date) AS min_seq_date, MAX(seq_date) AS max_seq_date
     FROM ref_genomes
     WHERE stage = 3
     GROUP BY og_id
 ),
+-- Mirrors ENA-ref step 00: a hifi validation must match a stage-3 seq_date, a hic one
+-- need not, because Hi-C is often resequenced long after the assembly.
 matched AS (
     SELECT DISTINCT ON (lv.og_id)
         lv.og_id,
@@ -137,10 +179,14 @@ matched AS (
         lv.validated_species_name,
         lv.validator
     FROM lca_validation lv
-    JOIN rg3 ON rg3.og_id = lv.og_id AND rg3.seq_date = lv.seq_date
     WHERE lv.tech IN ('hifi', 'hic')
       AND lv.validated_species_name IS NOT NULL
       AND lv.validated_species_name <> ''
+      AND EXISTS (
+          SELECT 1 FROM rg3
+          WHERE rg3.og_id = lv.og_id
+            AND (lv.tech = 'hic' OR rg3.seq_date = lv.seq_date)
+      )
     ORDER BY lv.og_id, CASE lv.tech WHEN 'hifi' THEN 0 ELSE 1 END, lv.row_created_on DESC
 ),
 fallback AS (
@@ -156,31 +202,45 @@ fallback AS (
 ),
 validated AS (
     SELECT
-        f.og_id,
+        o.og_id,
         COALESCE(m.tech, f.tech) AS tech,
         COALESCE(m.validated_species_name, f.validated_species_name) AS validated_species_name,
         COALESCE(m.validator, f.validator) AS validator,
-        (m.og_id IS NULL) AS used_fallback
-    FROM fallback f
-    LEFT JOIN matched m ON m.og_id = f.og_id
+        (f.og_id IS NULL) AS no_validation,
+        (f.og_id IS NOT NULL AND m.og_id IS NULL) AS used_fallback
+    FROM stage3_ogs o
+    LEFT JOIN matched m ON m.og_id = o.og_id
+    LEFT JOIN fallback f ON f.og_id = o.og_id
+),
+sra_norm AS (
+    SELECT
+        og_id,
+        COALESCE(NULLIF(LOWER(BTRIM(data_type)), ''), 'unknown') AS data_type,
+        srr_accession,
+        ncbi_status,
+""" + RELEASE_STATE_SQL + """ AS release_state
+    FROM ref_genomes_sra_uploads
 ),
 sra_summary AS (
     SELECT
         og_id,
-        bool_or(ncbi_status = 'Released') AS any_sra_released,
-        COUNT(DISTINCT LOWER(ncbi_status)) AS raw_status_variety,
-        STRING_AGG(DISTINCT LOWER(ncbi_status), ', ' ORDER BY LOWER(ncbi_status)) AS raw_data_status,
-        STRING_AGG(DISTINCT 'raw ' || data_type || ' ' || LOWER(ncbi_status), ', '
-                   ORDER BY 'raw ' || data_type || ' ' || LOWER(ncbi_status)) AS raw_data_status_by_type,
+        bool_or(release_state = 'public') AS any_raw_public,
+        bool_and(release_state = 'public') AS all_raw_public,
+        bool_or(NULLIF(BTRIM(srr_accession), '') IS NOT NULL) AS raw_submitted,
+        COUNT(DISTINCT release_state) AS raw_status_variety,
+        STRING_AGG(DISTINCT release_state, ', ' ORDER BY release_state) AS raw_data_status,
+        STRING_AGG(DISTINCT 'raw ' || data_type || ' ' || release_state, ', '
+                   ORDER BY 'raw ' || data_type || ' ' || release_state) AS raw_data_status_by_type,
         STRING_AGG(srr_accession, ', ') FILTER (WHERE data_type = 'hifi')     AS hifi_srr,
         STRING_AGG(srr_accession, ', ') FILTER (WHERE data_type = 'hic')      AS hic_srr,
         STRING_AGG(srr_accession, ', ') FILTER (WHERE data_type = 'ont')      AS ont_srr,
         STRING_AGG(srr_accession, ', ') FILTER (WHERE data_type = 'illumina') AS illumina_srr,
-        STRING_AGG(ncbi_status,   ', ') FILTER (WHERE data_type = 'hifi')     AS hifi_status,
-        STRING_AGG(ncbi_status,   ', ') FILTER (WHERE data_type = 'hic')      AS hic_status,
-        STRING_AGG(ncbi_status,   ', ') FILTER (WHERE data_type = 'ont')      AS ont_status,
-        STRING_AGG(ncbi_status,   ', ') FILTER (WHERE data_type = 'illumina') AS illumina_status
-    FROM ref_genomes_sra_uploads
+        STRING_AGG(DISTINCT release_state, '+' ORDER BY release_state) FILTER (WHERE data_type = 'hifi')     AS hifi_release,
+        STRING_AGG(DISTINCT release_state, '+' ORDER BY release_state) FILTER (WHERE data_type = 'hic')      AS hic_release,
+        STRING_AGG(DISTINCT release_state, '+' ORDER BY release_state) FILTER (WHERE data_type = 'ont')      AS ont_release,
+        STRING_AGG(DISTINCT release_state, '+' ORDER BY release_state) FILTER (WHERE data_type = 'illumina') AS illumina_release,
+        STRING_AGG(DISTINCT release_state, '+' ORDER BY release_state) FILTER (WHERE data_type = 'unknown')  AS unknown_release
+    FROM sra_norm
     GROUP BY og_id
 )
 SELECT
@@ -196,24 +256,28 @@ SELECT
     u.bioproject_umbrella,
     u.bioproject_hap1,
     u.assembly_accession_hap1,
+    u.gca_accession_hap1,
     u.bioproject_hap2,
     u.assembly_accession_hap2,
+    u.gca_accession_hap2,
     u.bioproject_rawdata,
     ss.hifi_srr,
-    ss.hifi_status,
+    ss.hifi_release,
     ss.hic_srr,
-    ss.hic_status,
+    ss.hic_release,
     ss.ont_srr,
-    ss.ont_status,
+    ss.ont_release,
     ss.illumina_srr,
-    ss.illumina_status,
+    ss.illumina_release,
+    ss.unknown_release,
+    COALESCE(ss.raw_submitted, false) AS raw_submitted,
     COALESCE(u.embargo_status, s.embargo_status) AS embargo_status,
     CONCAT_WS(', ',
-        CASE WHEN v.used_fallback THEN 'no hifi/hic validation matching stage-3 seq_date' END,
-        CASE WHEN v.validated_species_name IS DISTINCT FROM s.nominal_species_id
+        CASE WHEN v.no_validation THEN 'no validated species name recorded' END,
+        CASE WHEN v.used_fallback THEN 'no hifi/hic validation for this assembly' END,
+        CASE WHEN NOT v.no_validation
+              AND v.validated_species_name IS DISTINCT FROM s.nominal_species_id
              THEN 'species mismatch: validated vs nominal' END,
-        CASE WHEN NOT v.used_fallback AND v.tech = 'hic'
-             THEN 'validated via hic only (ENA pipeline requires hifi)' END,
         CASE WHEN sd.min_seq_date IS DISTINCT FROM sd.max_seq_date
              THEN 'hap1/hap2 stage-3 seq_date inconsistent' END
     ) AS data_quality_flag,
@@ -227,23 +291,30 @@ SELECT
             THEN 'not registered on NCBI'
         WHEN u.og_id IS NULL
             THEN 'registered in sample, pending sync'
+        WHEN NULLIF(u.gca_accession_hap1, '') IS NOT NULL
+         AND NULLIF(u.gca_accession_hap2, '') IS NOT NULL
+         AND COALESCE(ss.raw_submitted, false)
+            THEN 'all uploaded, public'
         WHEN u.assembly_accession_hap1 IS NOT NULL
          AND u.assembly_accession_hap2 IS NOT NULL
-         AND COALESCE(ss.any_sra_released, false)
+         AND COALESCE(ss.raw_submitted, false)
             THEN 'all uploaded'
         ELSE CONCAT_WS(', ',
             CASE
-                WHEN u.assembly_accession_hap1 IS NOT NULL THEN 'hap1 uploaded'
-                WHEN u.bioproject_hap1         IS NOT NULL THEN 'hap1 pending'
+                WHEN NULLIF(u.gca_accession_hap1, '') IS NOT NULL THEN 'hap1 public'
+                WHEN u.assembly_accession_hap1        IS NOT NULL THEN 'hap1 uploaded'
+                WHEN u.bioproject_hap1                IS NOT NULL THEN 'hap1 pending'
             END,
             CASE
-                WHEN u.assembly_accession_hap2 IS NOT NULL THEN 'hap2 uploaded'
-                WHEN u.bioproject_hap2         IS NOT NULL THEN 'hap2 pending'
+                WHEN NULLIF(u.gca_accession_hap2, '') IS NOT NULL THEN 'hap2 public'
+                WHEN u.assembly_accession_hap2        IS NOT NULL THEN 'hap2 uploaded'
+                WHEN u.bioproject_hap2                IS NOT NULL THEN 'hap2 pending'
             END,
             CASE
                 WHEN ss.raw_status_variety > 1        THEN ss.raw_data_status_by_type
                 WHEN ss.raw_status_variety = 1        THEN 'raw data ' || ss.raw_data_status
                 WHEN u.bioproject_rawdata IS NOT NULL THEN 'raw data pending'
+                ELSE 'raw data not submitted'
             END
         )
     END AS upload_status
@@ -256,10 +327,6 @@ LEFT JOIN sra_summary ss
     ON ss.og_id = v.og_id
 LEFT JOIN stage3_seqdates sd
     ON sd.og_id = v.og_id
-WHERE EXISTS (
-    SELECT 1 FROM ref_genomes r
-    WHERE r.og_id = v.og_id AND r.stage = 3
-)
 ORDER BY v.og_id
 """
 
@@ -276,6 +343,14 @@ WITH base AS (
       s.embargo_status,
       s.nominal_species_id,
       s.ncbi_id,
+      s.tol_id,
+      CASE
+        WHEN EXISTS (SELECT 1 FROM ref_genomes r WHERE r.og_id = m.og_id AND r.stage = 3)
+          THEN 'reference'
+        WHEN EXISTS (SELECT 1 FROM draft_genomes d WHERE d.og_id = m.og_id)
+          THEN 'draft'
+        ELSE 'unknown'
+      END AS cohort,
       CASE
         WHEN m.genbank_accession IS NOT NULL
              AND BTRIM(m.genbank_accession) <> '' THEN 1
@@ -366,6 +441,10 @@ SELECT
   pk.genbank_accession,
   pk.embargo_status,
   pk.nominal_species_id,
+  pk.tol_id,
+  pk.cohort,
+  es.ena_analysis_accession,
+  es.ena_assembly_accession,
   v.validated_species_name,
   CONCAT_WS(', ',
       CASE WHEN v.no_validation THEN 'no validated species name recorded' END,
@@ -376,9 +455,10 @@ SELECT
       CASE WHEN NULLIF(pk.ncbi_id::text, '') IS NULL THEN 'missing ncbi_id' END
   ) AS data_quality_flag,
   CASE
+    WHEN NULLIF(BTRIM(es.ena_assembly_accession), '') IS NOT NULL THEN 'submitted, public'
     WHEN es.submission_status = 'ACCESSION_ASSIGNED' THEN 'submitted, accession assigned'
-    WHEN es.submission_status = 'SUBMITTED' THEN 'submitted, pending accession'
     WHEN es.submission_status = 'FAILED' THEN 'submission failed'
+    WHEN es.submission_status = 'NOT_SUBMITTED' THEN 'not submitted'
     WHEN ev.submission_ready THEN 'ready to submit'
     ELSE 'needs_uploading'
   END AS upload_status
