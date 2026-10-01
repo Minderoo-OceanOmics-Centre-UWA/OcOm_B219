@@ -46,7 +46,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from queries import CLASSIFY, PUBLIC_STATUS
+from queries import CLASSIFY
 
 SECTIONS = [
     ('ref', 'Reference genomes'),
@@ -429,44 +429,8 @@ def render_pdf(current, previous, out_path):
         pdf.multi_cell(page_w - w, 4.6, meaning, new_x='LMARGIN', new_y='NEXT')
     pdf.ln(1)
 
-    # --- appendix -------------------------------------------------------------------
+    # The footer sits inside the bottom margin, so it must not trigger a page break.
     pdf.set_auto_page_break(False)
-    ensure_room(14)
-    pdf.ln(6)
-    pdf.set_font('Helvetica', 'B', 11)
-    pdf.set_text_color(*TEXT_RGB)
-    pdf.set_x(pdf.l_margin)
-    pdf.cell(0, 7, "Reference genomes published", new_x="LMARGIN", new_y="NEXT")
-
-    half_w = page_w / 2
-    entry_h = 4.6
-    all_rows = current.get('rows', [])
-    uploaded_rows = sorted(
-        (r for r in all_rows if CLASSIFY['ref'](r.get('ref_upload_status')) == 'uploaded'),
-        key=lambda r: r['og_id']
-    )
-    for i in range(0, len(uploaded_rows), 2):
-        pair = uploaded_rows[i:i + 2]
-        ensure_room(entry_h)
-        y = pdf.get_y()
-        for col, r in enumerate(pair):
-            species = r.get('species') or '-'
-            pdf.set_xy(pdf.l_margin + col * half_w, y)
-            pdf.set_font('Helvetica', '', 8)
-            pdf.set_text_color(*TEXT_RGB)
-            og_w = pdf.get_string_width(r['og_id']) + 2
-            pdf.cell(og_w, entry_h, r['og_id'])
-            pdf.set_font('Helvetica', 'I', 8)
-            pdf.set_text_color(*MUTED_RGB)
-            pdf.cell(half_w - og_w - 4, entry_h, species)
-        pdf.set_y(y + entry_h)
-
-    pdf.ln(3)
-    ensure_room(10)
-    note_line(f"Draft genomes ({summary['per_type']['draft']['measures']['total']['published']}) and "
-              f"mitogenomes ({summary['per_type']['mito']['measures']['total']['published']}) are too "
-              f"numerous to list here - see og_status.csv for the full per-OG breakdown.")
-
     pdf.set_y(-20)
     pdf.set_draw_color(*BORDER_RGB)
     pdf.set_line_width(0.3)
@@ -491,7 +455,6 @@ def main():
     current = {
         'generated_at': current_generated_at,
         'summary': summarize(current_rows),
-        'rows': current_rows,
     }
 
     previous = extract_previous(previous_path) if previous_path and previous_path.exists() else None
