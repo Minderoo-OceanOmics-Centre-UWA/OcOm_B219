@@ -1,31 +1,17 @@
 #!/usr/bin/env python3
-"""Fill the public GCA_ accession ENA assigns once a submitted assembly has been processed.
+"""Fill the public GCA_ accession ENA assigns once an assembly has been processed.
 
-ENA issues the GCA hours to days after it accepts an ERZ, so the submission pipelines can
-only record the ERZ. This fills in the GCA for all three genome types in one pass, as part
-of the quarterly report run, rather than running each pipeline's own resolver separately.
+ENA issues the GCA hours to days after accepting an ERZ, so the submission pipelines
+can only record the ERZ. This fills all three genome types in one pass:
 
     ref    ref_genomes_assembly_uploads.gca_accession_hap1 / _hap2
     draft  draft_genomes.assembly_accession
     mito   ena_submissions.ena_assembly_accession
 
-Each type is matched against the ENA Portal API differently, because of how its assemblies
-are organised into studies:
-
-    ref    every haplotype has its own BioProject, so one query over those studies returns
-           one assembly per haplotype. Falls back to BioSample + "_haplotype_N_" in the
-           assembly name when bioproject_hapN is blank.
-    draft  all drafts sit in one study, so assemblies are matched on BioSample, with the
-           OG id in the assembly name as a tie-breaker.
-    mito   every mitogenome has its own component BioProject; assemblies are matched on
-           assembly_name, which Webin-CLI sets from the manifest NAME (the full_seqid).
-           The BioSample is checked as a sanity guard, not used for matching.
-
-Writes are BLANK-ONLY - an existing accession is never overwritten; a differing value is
-reported as a conflict and left alone.
+Writes are blank-only; a differing existing value is reported as a conflict.
 
 Usage:
-    singularity run $SING/psycopg2:0.1.sif python resolve_gca_accessions.py \\
+    singularity run $SING/psycopg2:0.1.sif python resolve_gca_accessions.py \
         ~/postgresql_details/oceanomics.cfg [--types ref,draft,mito] [--dry-run]
 """
 
@@ -43,8 +29,8 @@ import psycopg2
 
 PORTAL = "https://www.ebi.ac.uk/ena/portal/api/search"
 DRAFT_STUDY = "PRJEB123829"
-CHUNK = 40     # studies per Portal query, keeps the URL short
-RETRIES = 4    # the Portal intermittently answers 200 with a truncated body
+CHUNK = 40
+RETRIES = 4
 FIELDS = 'accession,assembly_name,sample_accession,study_accession,version'
 
 
@@ -218,7 +204,6 @@ def resolve_draft(cur, conn, dry_run, study=DRAFT_STUDY):
     for og_id, seq_date, biosample, _erz, existing in rows:
         cands = by_sample.get(biosample or '', [])
         if len(cands) > 1:
-            # Same BioSample used for >1 assembly; prefer the one named for this OG.
             named = [c for c in cands if f"_{og_id}_" in c['assembly_name']]
             cands = named or cands
         if not cands:
@@ -272,7 +257,6 @@ def resolve_mito(cur, conn, dry_run, webin_mode='production'):
             continue
         hit = cands[0]
         if biosample and hit['sample_accession'] and hit['sample_accession'] != biosample:
-            # Same name under a different sample: not ours to guess about.
             rep.conflicts.append((full_seqid, f"BioSample {biosample}", f"ENA {hit['sample_accession']}"))
             continue
         gca_full = full_accession(hit)

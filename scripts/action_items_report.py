@@ -1,42 +1,15 @@
 #!/usr/bin/env python3
-"""Action items report — a to-do list of OGs and what's needed next.
+"""Action items report - a to-do list of OGs and what is needed next.
 
-Queries the DB directly (like combined_upload_status.py) and produces a
-categorized action list instead of a status table: for draft/ref/mito, each
-non-"uploaded" upload_status becomes a plain-language action, and any
-non-empty data_quality_flag becomes its own action; plus the new ToLID/NCBI
-taxon readiness funnel (TOLID_SQL in queries.py — see that file for the full
-bucket logic, scoped to sample.hifi = 'Y' per OcOm_SOP_B231's real trigger
-population). ToLID-funnel actions are grouped under "Reference genomes",
-since ToLID requests are reference-genome-specific.
-
-Dedup: TOLID_SQL's "needs species validation" bucket and DRAFT_SQL's "no
-validated species name recorded" flag test the same underlying fact (no
-lca_validation row at all, any tech). Where an OG already got that fact
-reported via the draft row, the TOLID_SQL version is skipped so it isn't
-double-reported — but TOLID_SQL's bucket is still needed on its own, since
-most hifi='Y' OGs (roughly 7 in 10) have no draft_genomes record at all and
-would otherwise never surface this fact anywhere.
-
-Produces reports/og_status_action_items.txt: grouped as
-    <GENOME TYPE>
-      <action category> (N OGs)
-        og_id   species
-        ...
-one block per (genome type, action category) combination, so it reads as a
-to-do list rather than a spreadsheet — an OG appears in every block it has
-an outstanding action for. Also prints the same structure (counts only, no
-OG listing) to stdout.
-
-Only OGs with embargo_status = 'Release' are included — embargoed OGs
-aren't being actively pushed out this quarter, so there's no action to take
-on them yet. This is the same population the summary PDF counts as "In
-progress". Blocks are ordered Reference genomes -> Mitogenomes -> Draft
-genomes.
+Each non-uploaded upload_status becomes a plain-language action and each
+data_quality_flag becomes its own action, plus the ToLID/NCBI taxon funnel
+(TOLID_SQL). Only OGs with embargo_status = 'Release' are included.
 
 Usage:
     singularity run $SING/psycopg2:0.1.sif python3 action_items_report.py \
         ~/postgresql_details/oceanomics.cfg [output.txt]
+
+    Writes reports/og_status_action_items.txt, grouped by genome type then action.
 """
 import configparser
 import psycopg2

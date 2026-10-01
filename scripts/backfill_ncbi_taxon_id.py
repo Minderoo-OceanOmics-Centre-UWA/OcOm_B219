@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
 """Backfill sample.ncbi_id from master_species.ncbi_taxon_id.
 
-For every sample row where ncbi_id is NULL, empty, or non-numeric, looks up
-the matching species in master_species (joining on
-master_species.species = sample.nominal_species_id) and writes the numeric
-ncbi_taxon_id back to sample.ncbi_id.
-
-Only updates if:
-  - sample.ncbi_id is currently NULL, blank, or not a valid integer
-  - lca_validation confirms validated_species_name = nominal_species_id (any tech)
-  - master_species.ncbi_taxon_id is a valid integer
-
-Covers all OG types (ref, draft, mito) — any OG whose species name is validated.
+Only updates where sample.ncbi_id is blank or non-numeric, lca_validation confirms
+validated_species_name = nominal_species_id, and master_species.ncbi_taxon_id is a
+valid integer.
 
 Usage:
     singularity run $SING/psycopg2:0.1.sif python backfill_ncbi_taxon_id.py \
         ~/postgresql_details/oceanomics.cfg [--dry-run]
-
-    --dry-run   Show what would be updated without writing to the DB.
 """
 import configparser
 import psycopg2
@@ -72,10 +62,8 @@ updated = []
 skipped = []
 
 for og_id, nominal_species_id, current_ncbi_id, ncbi_taxon_id in rows:
-    # master_species stores some ids as floats ('5079.0'). Strip that suffix only -
-    # rstrip('.0') would also eat a genuine trailing zero, turning 50790 into 5079.
     raw = str(ncbi_taxon_id).strip() if ncbi_taxon_id else ''
-    if raw.endswith('.0'):
+    if raw.endswith('.0'):  # not rstrip('.0'), which would turn 372800 into 3728
         raw = raw[:-2]
     if not raw.isdigit():
         skipped.append((og_id, nominal_species_id, ncbi_taxon_id, 'not numeric'))

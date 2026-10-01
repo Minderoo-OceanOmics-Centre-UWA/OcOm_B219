@@ -1,13 +1,7 @@
-"""Shared SQL queries for the NCBI upload status reports.
+"""Shared SQL and status logic for the upload status reports.
 
-Single source of truth for the draft/ref/mito status queries, imported by
-the three standalone scripts (draft_genome_upload_status.py,
-ref_genome_upload_status.py, mitogenome_upload_status.py) and by
-combined_upload_status.py, so the logic only ever lives in one place.
-
-Also holds TYPES/CLASSIFY: the shared "which upload_status values count as
-actually uploaded" logic, used by both generate_summary_report.py and
-action_items_report.py so the definition of "uploaded" only lives here.
+Single source of truth: the four queries and the "which upload_status values count
+as uploaded" rules, imported by every other script.
 """
 
 TYPES = [
@@ -42,10 +36,6 @@ def classify_mito(s):
 
 CLASSIFY = {'draft': classify_draft, 'ref': classify_ref, 'mito': classify_mito}
 
-# ref_genomes_sra_uploads.ncbi_status carries three vocabularies at once: the NCBI-era
-# 'Released'/'ToBeReleased' labels, and a bare holdUntilDate written by the ENA pipeline's
-# step 09. An accession existing means the data is submitted; this column is only about
-# whether it has gone public yet.
 RELEASE_STATE_SQL = """
         CASE
             WHEN NULLIF(BTRIM(ncbi_status), '') IS NULL THEN 'unknown'
@@ -163,8 +153,6 @@ stage3_seqdates AS (
     WHERE stage = 3
     GROUP BY og_id
 ),
--- Mirrors ENA-ref step 00: a hifi validation must match a stage-3 seq_date, a hic one
--- need not, because Hi-C is often resequenced long after the assembly.
 matched AS (
     SELECT DISTINCT ON (lv.og_id)
         lv.og_id,

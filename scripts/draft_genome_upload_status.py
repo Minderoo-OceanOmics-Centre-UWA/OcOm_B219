@@ -1,52 +1,14 @@
 #!/usr/bin/env python3
 """Draft genome upload status report.
 
-Reports NCBI upload status for draft genomes, one row per og_id (using the
-latest seq_date, or the row matching an ilmn lca_validation record if one
-exists, for OGs with more than one draft_genomes record). No filters —
-every og_id in draft_genomes with a matching sample row is included.
-
-upload_status (checked top-down, first match wins; bioproject_accession is
-NOT checked — draft's two BioProjects are fixed constants, never written
-back per-OG, matching ENA-draft-genomes/00_create_draft_samplesheet.py):
-    all uploaded                     biosample_accession, sra_accession, AND
-                                      assembly_accession (the public GCA_) all
-                                      present and validly formatted
-                                      (sra_accession accepts SRR or ERR).
-    submitted, awaiting GCA          biosample/sra_accession present and the
-                                      assembly has an ERZ in
-                                      ena_analysis_accession, but ENA has not
-                                      yet issued its public GCA_ — that arrives
-                                      hours to days later and is filled in by
-                                      resolve_gca_accessions.py.
-    raw uploaded, assembly pending   biosample/sra_accession present, no
-                                      assembly submitted at all.
-    raw+assembly needs uploading     catch-all: nothing registered yet, or any
-                                      other partial state.
-
-data_quality_flag (informational, independent of upload_status; matches
-ENA-draft-genomes/00_create_draft_samplesheet.py's own checks, so an OG
-flagged clear here should pass that script's validation too):
-    no validated species name recorded    no lca_validation row at all has one
-                                           (matches this record's seq_date,
-                                           tech = ilmn).
-    no ilmn validation matching seq_date  a validated name exists, but not from
-                                           an ilmn row matching this seq_date —
-                                           fell back to the latest overall.
-    species mismatch: validated vs nominal   disagrees with sample.nominal_species_id.
-    missing ncbi_id                       sample.ncbi_id is blank — ENA's
-                                           mandatory TAXON_ID, a hard gate on
-                                           that pipeline's side.
-
-Full SQL + comments: queries.py (DRAFT_SQL).
+One row per og_id, using the seq_date that matches an ilmn lca_validation record,
+else the latest. Full SQL: queries.py (DRAFT_SQL).
 
 Usage:
     singularity run $SING/psycopg2:0.1.sif python draft_genome_upload_status.py \
         ~/postgresql_details/oceanomics.cfg
 
-    Always writes a timestamped CSV to ../reports/ (a sibling of this
-    script's directory) — no output path to specify, and nothing is ever
-    overwritten.
+    Writes a timestamped CSV + flagged-only CSV to ../reports/.
 """
 import configparser, psycopg2, csv, sys
 from collections import Counter

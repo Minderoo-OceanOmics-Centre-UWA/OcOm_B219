@@ -1,23 +1,9 @@
 #!/usr/bin/env python3
-"""Combined upload status report — draft + reference + mitogenomes in one view.
+"""Combined upload status report - draft + reference + mitogenomes in one view.
 
-Runs the same queries as draft_genome_upload_status.py, ref_genome_upload_status.py,
-and mitogenome_upload_status.py (imported from queries.py, so there's one source of
-truth for the logic), then pivots to ONE ROW PER og_id — since an OG can have a
-draft, ref, and/or mito record at once, each type gets its own upload_status /
-data_quality_flag columns side by side rather than being listed as separate rows.
-
-Carries the two publication channels side by side: accessions lodged at ENA/SRA, and
-what is publicly downloadable from the open-data S3 bucket (see public_release.py).
-
-Produces:
-  1. The pivoted combined table (see COMBINED_COLS below).
-  2. A summary: total OGs and upload_status breakdown per type, plus a grand total.
-  3. A combined data quality issues report (OGs with a flag in any type).
-
-For full per-type detail (e.g. ref genome haplotype/SRA columns, draft accession
-columns), run the individual scripts — this report is intentionally the normalized
-"at a glance" view, not a replacement for them.
+Runs all three queries and pivots to one row per og_id, carrying both publication
+channels side by side: accessions at ENA/NCBI, and what is public on the open-data
+bucket (see public_release.py).
 
 Usage:
     singularity run $SING/psycopg2:0.1.sif python combined_upload_status.py \
@@ -34,7 +20,6 @@ from queries import DRAFT_SQL, REF_SQL, MITO_SQL
 
 TYPES = ('draft', 'ref', 'mito')
 
-# Extra per-type columns to carry through: {output column: source column in that query}
 EXTRA_COLS = {
     'draft': {
         'draft_assembly_published': 'assembly_published',

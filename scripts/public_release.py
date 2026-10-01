@@ -1,21 +1,10 @@
 #!/usr/bin/env python3
 """Open-data release state, read from the S3 species bucket.
 
-refgen-compile publishes reference genomes to the open-data bucket and records nothing
-about it in the database, so the bucket listing is the only source of truth for what is
-publicly downloadable. One shallow rclone listing covers every species:
-
-    opendata:minderoo-oceanomics/species/<Species>/<ToLID>/
-        assembly_curated/, assembly_oceangenomes_v1/  -> assemblies public
-        assembly_MT_oceangenomes/                     -> mitogenome public
-        genomic_data/pacbio_hifi/                     -> HiFi raw reads public
-        genomic_data/dovetail/                        -> Hi-C raw reads public
-
-Draft genomes have no open-data channel; this bucket covers reference genomes and the
-mitogenomes published alongside them.
-
-Rows are matched on species AND ToLID together, never ToLID alone: fAcaSol2 belongs to
-both OG652 and OG767, with different embargo statuses.
+refgen-compile publishes reference genomes to the open-data bucket and records
+nothing in the database, so the listing is the only source of truth for what is
+publicly downloadable. Rows are matched on species AND ToLID together, never ToLID
+alone. Draft genomes have no open-data channel.
 
 Usage:
     python3 public_release.py [listing.txt]     # refresh the listing, then summarise

@@ -1,42 +1,17 @@
 #!/usr/bin/env python3
-"""Quarterly summary report — headline counts for sharing with management.
+"""Quarterly summary report - the manager-facing PDF.
 
-Reads a combined og_status CSV (as produced by combined_upload_status.py) and renders a
-short PDF summary (needs `pip3 install --user fpdf2`), with one section per genome type:
-reference genomes, draft genomes, mitogenomes.
+Reads the combined og_status CSV and renders one table per genome type: three rows
+(Total OGs, Assemblies, Raw data) against four mutually exclusive columns, so each
+row adds up to that type's OG count. GenomeArk is a subset of Published and is not
+part of the sum. The PDF explains the columns itself.
 
-Each section is one table of three rows — Total OGs, Assemblies, Raw data — against four
-mutually exclusive columns, so every row adds up to that type's OG count:
-
-    Published    an accession is on record at ENA/NCBI. Whether it has gone public yet
-                 (the ERZ -> GCA step) is deliberately ignored here.
-    In progress  sample.embargo_status is 'Release' but nothing is submitted yet.
-    Embargo      sample.embargo_status is 'Embargo' and nothing is submitted yet.
-    Embargo/Release unknown   no embargo decision recorded against the sample.
-
-GenomeArk sits beside those as a subset of Published — how many are also on the open-data
-bucket — and is NOT part of the sum. Draft genomes have no GenomeArk channel, and
-mitogenome submissions carry no raw reads, so those cells read '-'.
-
-An OG with no record at all for a given type (hasn't reached that stage yet) isn't counted
-in that type's section. Per-technology raw detail (HiFi, Hi-C, ONT, Illumina) and the
-ERZ/GCA split stay in og_status.csv rather than the PDF.
-
-This is a derived, presentation-only view — it does not re-query the database. Run
-combined_upload_status.py (or run_combined_report.sh, which does this automatically)
-first to produce the CSV it reads.
-
-Only the PDF is archived quarter to quarter (not the source CSV) — so each PDF embeds its
-own totals in its document metadata (the PDF's Keywords field — not shown when the file is
-opened/printed). The next quarter's run reads that back out of the previous archived PDF
-(needs `pip3 install --user pypdf`) to compute the "since last report" deltas, rather than
-needing the original CSV.
+Derived, presentation-only - it does not query the database. Needs fpdf2, and pypdf
+for the quarter-on-quarter deltas: each PDF embeds its counts in its own metadata,
+and the next run reads them back out of the newest file in ../reports/archive/.
 
 Usage:
     python3 generate_summary_report.py <current.csv> <output.pdf> [previous.pdf]
-
-    If previous.pdf is omitted, the script looks in ../reports/archive/ for the most
-    recently archived summary PDF and uses that automatically (skipped if none exists yet).
 """
 import csv
 import re
@@ -54,16 +29,12 @@ SECTIONS = [
     ('mito', 'Mitogenomes'),
 ]
 
-# The three rows of each section. Every row partitions that type's whole OG count into
-# Published / In progress / Embargo / Embargo-Release unknown, so each row sums to the
-# section total. GenomeArk is a subset of Published and is not part of that sum.
 MEASURES = [
     ('Total OGs', 'total'),
     ('Assemblies', 'assemblies'),
     ('Raw data', 'raw'),
 ]
 
-# Mitogenome submissions carry no raw reads, so that cell has nothing to report.
 def applicable(genome_type, measure):
     return not (genome_type == 'mito' and measure == 'raw')
 
@@ -129,8 +100,6 @@ def summarize(rows):
             'cohort': Counter(r.get('mito_cohort') or 'unknown' for r in recs) if t == 'mito' else None,
         }
 
-    # Distinct OGs, not a sum across sections: a mitogenome is published under the same
-    # species/ToLID directory as its reference genome, so summing would count it twice.
     ark_cols = ('s3_assemblies', 's3_mito', 's3_raw_hifi', 's3_raw_hic')
     genomeark_ogs = sum(1 for r in rows if any(truthy(r.get(c)) for c in ark_cols))
 
@@ -268,7 +237,6 @@ def render_pdf(current, previous, out_path):
     pdf.cell(0, 5, f'Generated {generated_label}', new_x='LMARGIN', new_y='NEXT')
     pdf.ln(5)
 
-    # --- headline cards -------------------------------------------------------------
     cards = [
         (flat['total'], 'Distinct OGs found', delta_for('total')),
         (flat['total_published'], 'Published (draft + reference + mito)', delta_for('total_published')),
@@ -298,7 +266,6 @@ def render_pdf(current, previous, out_path):
             pdf.cell(box_w - 2 * CARD_PAD, 4, delta[0])
     pdf.set_y(y0 + box_h + 8)
 
-    # --- helpers --------------------------------------------------------------------
     def ensure_room(h):
         if pdf.get_y() + h > pdf.h - pdf.b_margin:
             pdf.add_page()
@@ -310,7 +277,6 @@ def render_pdf(current, previous, out_path):
         col_w = (page_w - label_w) / (len(headers) - 1)
         x0 = pdf.l_margin
         row_h = 8
-        # A header too wide for its column wraps onto a second line at '\n'.
         head_h = 11 if any('\n' in h for h in headers) else row_h
         pdf.set_fill_color(*HEADER_FILL_RGB)
         y_head = pdf.get_y()
@@ -338,7 +304,6 @@ def render_pdf(current, previous, out_path):
             for value, delta_key in cells:
                 delta = delta_for(delta_key) if delta_key else None
                 text = str(value)
-                # Every cell sets its own font and colour: a delta leaves them changed.
                 pdf.set_font('Helvetica', '', 9)
                 pdf.set_text_color(*TEXT_RGB)
                 if not delta:
@@ -374,7 +339,6 @@ def render_pdf(current, previous, out_path):
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(page_w, 4, text, new_x='LMARGIN', new_y='NEXT')
 
-    # --- one section per genome type ------------------------------------------------
     headers = ['', 'Published', 'GenomeArk', 'In progress', 'Embargo', 'Embargo/Release\nunknown']
     for t, label in SECTIONS:
         info = summary['per_type'][t]
@@ -406,7 +370,6 @@ def render_pdf(current, previous, out_path):
         elif t == 'draft':
             note_line('Draft genomes are not published to GenomeArk.')
 
-    # --- what the columns mean ------------------------------------------------------
     heading('Note')
     for term, meaning in [
         ('Published', 'an accession is recorded for that data at ENA/NCBI.'),
@@ -427,7 +390,6 @@ def render_pdf(current, previous, out_path):
         pdf.multi_cell(page_w - w, 4.6, meaning, new_x='LMARGIN', new_y='NEXT')
     pdf.ln(1)
 
-    # The footer sits inside the bottom margin, so it must not trigger a page break.
     pdf.set_auto_page_break(False)
     pdf.set_y(-20)
     pdf.set_draw_color(*BORDER_RGB)
