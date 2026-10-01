@@ -129,10 +129,15 @@ def summarize(rows):
             'cohort': Counter(r.get('mito_cohort') or 'unknown' for r in recs) if t == 'mito' else None,
         }
 
+    # Distinct OGs, not a sum across sections: a mitogenome is published under the same
+    # species/ToLID directory as its reference genome, so summing would count it twice.
+    ark_cols = ('s3_assemblies', 's3_mito', 's3_raw_hifi', 's3_raw_hic')
+    genomeark_ogs = sum(1 for r in rows if any(truthy(r.get(c)) for c in ark_cols))
+
     return {
         'total': len(rows),
         'total_published': sum(per_type[t]['measures']['total']['published'] for t, _ in SECTIONS),
-        'total_genomeark': sum(per_type[t]['measures']['total']['genomeark'] for t, _ in SECTIONS),
+        'total_genomeark': genomeark_ogs,
         'per_type': per_type,
     }
 
@@ -261,17 +266,14 @@ def render_pdf(current, previous, out_path):
 
     pdf.set_font('Helvetica', '', 8.5)
     pdf.set_text_color(*MUTED_RGB)
-    note = f'Generated {generated_label}'
-    if previous:
-        note += f'   |   Compared against the report generated {prev_generated_label}'
-    pdf.cell(0, 5, note, new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 5, f'Generated {generated_label}', new_x='LMARGIN', new_y='NEXT')
     pdf.ln(5)
 
     # --- headline cards -------------------------------------------------------------
     cards = [
         (flat['total'], 'Distinct OGs found', delta_for('total')),
         (flat['total_published'], 'Published (draft + reference + mito)', delta_for('total_published')),
-        (flat['total_genomeark'], 'On GenomeArk', delta_for('total_genomeark')),
+        (flat['total_genomeark'], 'OGs on GenomeArk', delta_for('total_genomeark')),
     ]
     box_gap = 5
     box_w = (page_w - box_gap * (len(cards) - 1)) / len(cards)
@@ -407,16 +409,14 @@ def render_pdf(current, previous, out_path):
             note_line('Draft genomes are not published to GenomeArk.')
 
     # --- what the columns mean ------------------------------------------------------
-    heading('What the columns mean')
+    heading('Note')
     for term, meaning in [
-        ('Published', 'an accession is recorded for that data at ENA/NCBI, whether or not it has '
-                      'gone public yet.'),
+        ('Published', 'an accession is recorded for that data at ENA/NCBI.'),
         ('GenomeArk', 'also published to the open-data bucket. This is a subset of Published, so it '
                       'is not added into the row.'),
         ('In progress', 'cleared for release, but nothing submitted yet - the actionable backlog.'),
         ('Embargo', 'under embargo and not submitted.'),
-        ('Embargo/Release unknown', 'no embargo decision is recorded against the sample, so it '
-                                    'cannot be actioned either way.'),
+        ('Embargo/Release unknown', 'no embargo decision is recorded against the sample.'),
     ]:
         ensure_room(9)
         pdf.set_x(pdf.l_margin)
@@ -428,9 +428,6 @@ def render_pdf(current, previous, out_path):
         pdf.set_text_color(*MUTED_RGB)
         pdf.multi_cell(page_w - w, 4.6, meaning, new_x='LMARGIN', new_y='NEXT')
     pdf.ln(1)
-    note_line('Published, In progress, Embargo and Embargo/Release unknown are mutually exclusive, '
-              'so each row adds up to the section total. Per-technology detail (HiFi, Hi-C, ONT, '
-              'Illumina) and per-OG accessions are in og_status.csv.')
 
     # --- appendix -------------------------------------------------------------------
     pdf.set_auto_page_break(False)
