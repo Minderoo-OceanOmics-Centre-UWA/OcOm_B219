@@ -233,7 +233,6 @@ def render_pdf(current, previous, out_path):
     summary = current['summary']
     flat = flatten(summary)
     prev_counts = previous['counts'] if previous else {}
-    prev_generated_label = previous['generated_at'] if previous else None
 
     def delta_for(key):
         if key not in prev_counts or key not in flat:

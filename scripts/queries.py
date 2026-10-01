@@ -42,14 +42,6 @@ def classify_mito(s):
 
 CLASSIFY = {'draft': classify_draft, 'ref': classify_ref, 'mito': classify_mito}
 
-# The public/GCA-bearing status per type, counted separately from "uploaded" so the
-# headline number stays comparable with previously archived reports.
-PUBLIC_STATUS = {
-    'draft': 'all uploaded',
-    'ref': 'all uploaded, public',
-    'mito': 'submitted, public',
-}
-
 # ref_genomes_sra_uploads.ncbi_status carries three vocabularies at once: the NCBI-era
 # 'Released'/'ToBeReleased' labels, and a bare holdUntilDate written by the ENA pipeline's
 # step 09. An accession existing means the data is submitted; this column is only about
@@ -468,7 +460,7 @@ SELECT
     WHEN es.submission_status = 'FAILED' THEN 'submission failed'
     WHEN es.submission_status = 'NOT_SUBMITTED' THEN 'not submitted'
     WHEN ev.submission_ready THEN 'ready to submit'
-    ELSE 'needs_uploading'
+    ELSE 'needs uploading'
   END AS upload_status
 FROM picked pk
 LEFT JOIN validated v ON v.og_id = pk.og_id

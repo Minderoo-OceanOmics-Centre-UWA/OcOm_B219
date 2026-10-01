@@ -30,8 +30,9 @@ OG listing) to stdout.
 
 Only OGs with embargo_status = 'Release' are included — embargoed OGs
 aren't being actively pushed out this quarter, so there's no action to take
-on them yet. Blocks are ordered Reference genomes -> Mitogenomes -> Draft
-genomes, matching the PDF summary's "List of uploaded OGs" order.
+on them yet. This is the same population the summary PDF counts as "In
+progress". Blocks are ordered Reference genomes -> Mitogenomes -> Draft
+genomes.
 
 Usage:
     singularity run $SING/psycopg2:0.1.sif python3 action_items_report.py \

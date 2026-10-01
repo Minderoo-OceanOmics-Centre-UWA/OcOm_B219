@@ -20,7 +20,7 @@ dead mitogenome_data.genbank_accession column):
                                       cleared every format-validation gate
                                       the Mitogenomes pipeline runs
                                       (ena_validation_latest.submission_ready).
-    needs_uploading                  catch-all: not yet submission_ready.
+    needs uploading                  catch-all: not yet submission_ready.
 
 data_quality_flag (informational, independent of upload_status; matches
 lca_validation against this record's seq_date and its chosen technology;

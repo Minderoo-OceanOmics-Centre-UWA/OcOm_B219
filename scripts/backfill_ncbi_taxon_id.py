@@ -24,9 +24,12 @@ import psycopg2
 import sys
 
 DRY_RUN = '--dry-run' in sys.argv
+args = [a for a in sys.argv[1:] if not a.startswith('--')]
+if not args:
+    sys.exit('Usage: backfill_ncbi_taxon_id.py <config> [--dry-run]')
 
 cfg = configparser.ConfigParser()
-cfg.read(sys.argv[1])
+cfg.read(args[0])
 p = cfg['postgres']
 conn = psycopg2.connect(
     dbname=p['dbname'], user=p['user'], password=p['password'],
@@ -69,7 +72,11 @@ updated = []
 skipped = []
 
 for og_id, nominal_species_id, current_ncbi_id, ncbi_taxon_id in rows:
-    raw = str(ncbi_taxon_id).strip().rstrip('.0') if ncbi_taxon_id else ''
+    # master_species stores some ids as floats ('5079.0'). Strip that suffix only -
+    # rstrip('.0') would also eat a genuine trailing zero, turning 50790 into 5079.
+    raw = str(ncbi_taxon_id).strip() if ncbi_taxon_id else ''
+    if raw.endswith('.0'):
+        raw = raw[:-2]
     if not raw.isdigit():
         skipped.append((og_id, nominal_species_id, ncbi_taxon_id, 'not numeric'))
         continue

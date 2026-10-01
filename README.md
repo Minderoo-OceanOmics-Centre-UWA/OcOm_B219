@@ -12,6 +12,8 @@ Reporting on data sharing across Ocean Genomes: reference genomes, draft genomes
 
 ## Usage
 
+Needs the `$SING/psycopg2:0.1.sif` container, `~/postgresql_details/oceanomics.cfg`, `rclone` configured with the `opendata:` remote, and `fpdf2` + `pypdf` for the PDF.
+
 ```bash
 # Triage during the quarter — CSVs + action items only:
 bash run_combined_report.sh ~/postgresql_details/oceanomics.cfg --check
@@ -52,9 +54,9 @@ Four pipelines feed the columns this report reads. None of them is run from here
 
 ---
 
-## Individual per-type scripts
+## Scripts
 
-For full per-type detail the combined report normalizes away (e.g. ref haplotype/SRA columns):
+`run_combined_report.sh` runs these in order, but any of them can be run on its own. The three per-type scripts give the full detail the combined report normalizes away (e.g. ref haplotype/SRA columns):
 
 ```bash
 singularity run $SING/psycopg2:0.1.sif python scripts/<script.py> \
@@ -96,7 +98,7 @@ The three per-type scripts each write a timestamped CSV + flagged-only CSV to `r
 
 1. `--check` during the quarter; work through `og_status_action_items.txt`.
 2. When the submissions for the quarter are done, run without `--check`.
-3. Send `reports/og_status_summary.pdf` to the manager.
+3. View summary report under `reports/og_status_summary.pdf`.
 4. Commit and push the archived PDF — next quarter's report reads its embedded counts to compute deltas, and scratch is not durable storage.
 
 ```bash
