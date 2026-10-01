@@ -208,7 +208,7 @@ def render_pdf(current, previous, out_path):
             return None
         d = flat[key] - prev_counts[key]
         if d == 0:
-            return '(=)', MUTED_RGB
+            return None
         return f"({'+' if d > 0 else ''}{d})", (UP_RGB if d > 0 else DOWN_RGB)
 
     pdf = FPDF(format='A4', unit='mm')
