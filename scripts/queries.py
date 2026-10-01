@@ -134,6 +134,8 @@ SELECT
         CASE WHEN NULLIF(s.ncbi_id::text, '') IS NULL THEN 'missing ncbi_id' END
     ) AS data_quality_flag,
     (dg.sra_accession IS NOT NULL AND dg.sra_accession ~* '^(SRR|ERR)') AS raw_submitted,
+    (NULLIF(dg.ena_analysis_accession, '') IS NOT NULL
+     OR NULLIF(dg.assembly_accession, '') IS NOT NULL) AS assembly_published,
     CASE
       WHEN (dg.biosample_accession IS NOT NULL AND dg.biosample_accession ~* '^SAM')
        AND (dg.sra_accession        IS NOT NULL AND dg.sra_accession        ~* '^(SRR|ERR)')
@@ -271,6 +273,10 @@ SELECT
     ss.illumina_release,
     ss.unknown_release,
     COALESCE(ss.raw_submitted, false) AS raw_submitted,
+    (u.assembly_accession_hap1 IS NOT NULL
+     OR u.assembly_accession_hap2 IS NOT NULL
+     OR NULLIF(u.gca_accession_hap1, '') IS NOT NULL
+     OR NULLIF(u.gca_accession_hap2, '') IS NOT NULL) AS assembly_published,
     COALESCE(u.embargo_status, s.embargo_status) AS embargo_status,
     CONCAT_WS(', ',
         CASE WHEN v.no_validation THEN 'no validated species name recorded' END,
@@ -445,6 +451,8 @@ SELECT
   pk.cohort,
   es.ena_analysis_accession,
   es.ena_assembly_accession,
+  (NULLIF(BTRIM(es.ena_analysis_accession), '') IS NOT NULL
+   OR NULLIF(BTRIM(es.ena_assembly_accession), '') IS NOT NULL) AS assembly_published,
   v.validated_species_name,
   CONCAT_WS(', ',
       CASE WHEN v.no_validation THEN 'no validated species name recorded' END,

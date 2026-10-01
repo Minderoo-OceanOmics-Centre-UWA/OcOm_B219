@@ -37,9 +37,11 @@ TYPES = ('draft', 'ref', 'mito')
 # Extra per-type columns to carry through: {output column: source column in that query}
 EXTRA_COLS = {
     'draft': {
+        'draft_assembly_published': 'assembly_published',
         'draft_raw_submitted': 'raw_submitted',
     },
     'ref': {
+        'ref_assembly_published': 'assembly_published',
         'ref_raw_submitted': 'raw_submitted',
         'ref_raw_hifi': 'hifi_release',
         'ref_raw_hic': 'hic_release',
@@ -48,6 +50,7 @@ EXTRA_COLS = {
         'ref_raw_unknown': 'unknown_release',
     },
     'mito': {
+        'mito_assembly_published': 'assembly_published',
         'mito_cohort': 'cohort',
     },
 }

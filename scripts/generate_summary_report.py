@@ -2,21 +2,25 @@
 """Quarterly summary report — headline counts for sharing with management.
 
 Reads a combined og_status CSV (as produced by combined_upload_status.py) and renders a
-short PDF summary (needs `pip3 install --user fpdf2`), with one section per genome type.
-Each section separates assemblies from raw sequencing data, and ENA/SRA submission from
-what is publicly downloadable:
+short PDF summary (needs `pip3 install --user fpdf2`), with one section per genome type:
+reference genomes, draft genomes, mitogenomes.
 
-    Reference genomes  assemblies (ERZ -> GCA -> open-data bucket)
-                       raw data per technology (HiFi, Hi-C, ONT, Illumina)
-    Draft genomes      assemblies (ERZ -> GCA); Illumina raw. No open-data channel.
-    Mitogenomes        assemblies only — no raw reads are submitted by that pipeline.
-                       Split by whether the OG is a reference- or draft-genome OG.
+Each section is one table of three rows — Total OGs, Assemblies, Raw data — against four
+mutually exclusive columns, so every row adds up to that type's OG count:
 
-"Uploaded" per type follows queries.py's CLASSIFY, so the definition lives in one place;
-"public" follows PUBLIC_STATUS. An accession existing means submitted — release state is
-reported alongside, never as a precondition. "Released"/"Embargoed" for a whole OG comes
-from sample.embargo_status. An OG with no record at all for a given type (hasn't reached
-that stage yet) isn't counted in that type's section.
+    Published    an accession is on record at ENA/NCBI. Whether it has gone public yet
+                 (the ERZ -> GCA step) is deliberately ignored here.
+    In progress  sample.embargo_status is 'Release' but nothing is submitted yet.
+    Embargo      sample.embargo_status is 'Embargo' and nothing is submitted yet.
+    Embargo/Release unknown   no embargo decision recorded against the sample.
+
+GenomeArk sits beside those as a subset of Published — how many are also on the open-data
+bucket — and is NOT part of the sum. Draft genomes have no GenomeArk channel, and
+mitogenome submissions carry no raw reads, so those cells read '-'.
+
+An OG with no record at all for a given type (hasn't reached that stage yet) isn't counted
+in that type's section. Per-technology raw detail (HiFi, Hi-C, ONT, Illumina) and the
+ERZ/GCA split stay in og_status.csv rather than the PDF.
 
 This is a derived, presentation-only view — it does not re-query the database. Run
 combined_upload_status.py (or run_combined_report.sh, which does this automatically)
@@ -50,16 +54,18 @@ SECTIONS = [
     ('mito', 'Mitogenomes'),
 ]
 
-# Raw sequencing data columns per type, in the order they should be presented.
-RAW_TECHS = {
-    'ref': [('hifi', 'HiFi'), ('hic', 'Hi-C'), ('ont', 'ONT'), ('illumina', 'Illumina')],
-    'draft': [('illumina', 'Illumina')],
-    'mito': [],
-}
+# The three rows of each section. Every row partitions that type's whole OG count into
+# Published / In progress / Embargo / Embargo-Release unknown, so each row sums to the
+# section total. GenomeArk is a subset of Published and is not part of that sum.
+MEASURES = [
+    ('Total OGs', 'total'),
+    ('Assemblies', 'assemblies'),
+    ('Raw data', 'raw'),
+]
 
-# Which open-data bucket folder evidences each type's assemblies, and each raw technology.
-S3_ASSEMBLY_COL = {'ref': 's3_assemblies', 'mito': 's3_mito', 'draft': None}
-S3_RAW_COL = {'hifi': 's3_raw_hifi', 'hic': 's3_raw_hic'}
+# Mitogenome submissions carry no raw reads, so that cell has nothing to report.
+def applicable(genome_type, measure):
+    return not (genome_type == 'mito' and measure == 'raw')
 
 
 def load(csv_path):
@@ -69,76 +75,64 @@ def load(csv_path):
     return rows, generated_at
 
 
-def raw_state(value):
-    """Collapse a per-technology release state ('public', 'embargoed+public', '') to one
-    of None (nothing submitted), 'public', 'embargoed' or 'unknown'."""
-    if not value:
-        return None
-    parts = set(value.split('+'))
-    if parts == {'public'}:
-        return 'public'
-    if 'embargoed' in parts:
-        return 'embargoed'
-    return 'unknown'
-
-
 def truthy(value):
     return str(value).strip().lower() == 'true'
+
+
+def is_published(row, t, measure):
+    """Published means an accession is on record for that data, whether or not it has gone
+    public yet - the ERZ/GCA distinction is deliberately ignored here."""
+    assemblies = truthy(row.get(f'{t}_assembly_published'))
+    raw = truthy(row.get(f'{t}_raw_submitted')) if t != 'mito' else False
+    return {'assemblies': assemblies, 'raw': raw, 'total': assemblies or raw}[measure]
+
+
+def on_genomeark(row, t, measure):
+    """Published to the open-data bucket. Draft genomes have no such channel."""
+    if t == 'ref':
+        assemblies = truthy(row.get('s3_assemblies'))
+        raw = truthy(row.get('s3_raw_hifi')) or truthy(row.get('s3_raw_hic'))
+    elif t == 'mito':
+        assemblies, raw = truthy(row.get('s3_mito')), False
+    else:
+        return None
+    return {'assemblies': assemblies, 'raw': raw, 'total': assemblies or raw}[measure]
 
 
 def summarize(rows):
     per_type = {}
     for t, _ in SECTIONS:
-        counts = Counter()
-        raw = {tech: Counter() for tech, _ in RAW_TECHS[t]}
-        cohort = Counter()
-        for row in rows:
-            status = row.get(f'{t}_upload_status')
-            bucket = CLASSIFY[t](status)
-            if bucket == 'no_record':
+        recs = [r for r in rows if CLASSIFY[t](r.get(f'{t}_upload_status')) != 'no_record']
+        measures = {}
+        for _, measure in MEASURES:
+            if not applicable(t, measure):
+                measures[measure] = None
                 continue
-            counts['total'] += 1
-            if bucket == 'uploaded':
-                counts['uploaded'] += 1
-            if status == PUBLIC_STATUS[t]:
-                counts['public'] += 1
-
-            embargo = row.get('embargo_status')
-            if embargo == 'Embargo':
-                counts['embargoed'] += 1
-            elif embargo == 'Release':
-                counts['release_uploaded' if bucket == 'uploaded' else 'release_in_progress'] += 1
-
-            s3_col = S3_ASSEMBLY_COL[t]
-            if s3_col and truthy(row.get(s3_col)):
-                counts['s3'] += 1
-
-            if t == 'mito':
-                cohort[row.get('mito_cohort') or 'unknown'] += 1
-
-            for tech, _ in RAW_TECHS[t]:
-                if t == 'draft':
-                    # draft_genomes.sra_accession carries no release state, only presence.
-                    if truthy(row.get('draft_raw_submitted')):
-                        raw[tech]['submitted'] += 1
+            c = Counter()
+            for row in recs:
+                if is_published(row, t, measure):
+                    c['published'] += 1
+                    if on_genomeark(row, t, measure):
+                        c['genomeark'] += 1
                     continue
-                state = raw_state(row.get(f'{t}_raw_{tech}'))
-                if state is None:
-                    continue
-                raw[tech]['submitted'] += 1
-                raw[tech][state] += 1
-                s3_raw = S3_RAW_COL.get(tech)
-                if s3_raw and truthy(row.get(s3_raw)):
-                    raw[tech]['s3'] += 1
+                embargo = row.get('embargo_status')
+                if embargo == 'Release':
+                    c['in_progress'] += 1
+                elif embargo == 'Embargo':
+                    c['embargo'] += 1
+                else:
+                    c['unknown'] += 1
+            measures[measure] = c
+        per_type[t] = {
+            'total': len(recs),
+            'measures': measures,
+            'cohort': Counter(r.get('mito_cohort') or 'unknown' for r in recs) if t == 'mito' else None,
+        }
 
-        per_type[t] = {'counts': counts, 'raw': raw, 'cohort': cohort}
-
-    total_uploaded = sum(per_type[t]['counts']['uploaded'] for t, _ in SECTIONS)
-    total_public = sum(per_type[t]['counts']['public'] for t, _ in SECTIONS)
     return {
         'total': len(rows),
-        'total_uploaded': total_uploaded,
-        'total_public': total_public,
+        'total_published': sum(per_type[t]['measures']['total']['published'] for t, _ in SECTIONS),
+        'total_genomeark': sum(per_type[t]['measures']['total']['genomeark'] for t, _ in SECTIONS),
         'per_type': per_type,
     }
 
@@ -151,23 +145,25 @@ def find_previous(out_path):
     return candidates[-1] if candidates else None
 
 
-DATA_MARKER = 'OCOM_SUMMARY_DATA_V3'
-LEGACY_MARKERS = ('OCOM_SUMMARY_DATA_V3', 'OCOM_SUMMARY_DATA_V2')
+DATA_MARKER = 'OCOM_SUMMARY_DATA_V4'
+LEGACY_MARKERS = ('OCOM_SUMMARY_DATA_V4', 'OCOM_SUMMARY_DATA_V3', 'OCOM_SUMMARY_DATA_V2')
 
 
 def flatten(summary):
     """The counts embedded in the PDF for next quarter's deltas."""
     flat = {
         'total': summary['total'],
-        'total_uploaded': summary['total_uploaded'],
-        'total_public': summary['total_public'],
+        'total_published': summary['total_published'],
+        'total_genomeark': summary['total_genomeark'],
     }
     for t, _ in SECTIONS:
-        c = summary['per_type'][t]['counts']
-        for key in ('total', 'uploaded', 'public', 's3'):
-            flat[f'{t}_{key}'] = c[key]
-        for tech, _ in RAW_TECHS[t]:
-            flat[f'{t}_raw_{tech}'] = summary['per_type'][t]['raw'][tech]['submitted']
+        flat[f'{t}_total'] = summary['per_type'][t]['total']
+        for _, measure in MEASURES:
+            c = summary['per_type'][t]['measures'][measure]
+            if c is None:
+                continue
+            flat[f'{t}_{measure}_published'] = c['published']
+            flat[f'{t}_{measure}_genomeark'] = c['genomeark']
     return flat
 
 
@@ -273,9 +269,9 @@ def render_pdf(current, previous, out_path):
 
     # --- headline cards -------------------------------------------------------------
     cards = [
-        (flat['total'], 'Total OGs found', delta_for('total')),
-        (flat['total_uploaded'], 'Submitted (draft + reference + mito)', delta_for('total_uploaded')),
-        (flat['total_public'], 'Publicly available', delta_for('total_public')),
+        (flat['total'], 'Distinct OGs found', delta_for('total')),
+        (flat['total_published'], 'Published (draft + reference + mito)', delta_for('total_published')),
+        (flat['total_genomeark'], 'On GenomeArk', delta_for('total_genomeark')),
     ]
     box_gap = 5
     box_w = (page_w - box_gap * (len(cards) - 1)) / len(cards)
@@ -313,15 +309,22 @@ def render_pdf(current, previous, out_path):
         col_w = (page_w - label_w) / (len(headers) - 1)
         x0 = pdf.l_margin
         row_h = 8
+        # A header too wide for its column wraps onto a second line at '\n'.
+        head_h = 11 if any('\n' in h for h in headers) else row_h
         pdf.set_fill_color(*HEADER_FILL_RGB)
-        pdf.rect(x0, pdf.get_y(), page_w, row_h, 'F')
+        y_head = pdf.get_y()
+        pdf.rect(x0, y_head, page_w, head_h, 'F')
         pdf.set_font('Helvetica', 'B', 7.5)
         pdf.set_text_color(*TEXT_RGB)
-        pdf.set_x(x0)
-        pdf.cell(label_w, row_h, headers[0])
-        for h in headers[1:]:
-            pdf.cell(col_w, row_h, h, align='R')
-        pdf.ln(row_h)
+        pdf.set_xy(x0, y_head)
+        pdf.cell(label_w, head_h, headers[0])
+        for i, h in enumerate(headers[1:]):
+            cx = x0 + label_w + i * col_w
+            lines = h.split('\n')
+            for j, part in enumerate(lines):
+                pdf.set_xy(cx, y_head + (head_h - 4.2 * len(lines)) / 2 + j * 4.2)
+                pdf.cell(col_w, 4.2, part, align='R')
+        pdf.set_y(y_head + head_h)
         pdf.set_draw_color(*RULE_RGB)
         pdf.set_line_width(0.4)
         pdf.line(x0, pdf.get_y(), x0 + page_w, pdf.get_y())
@@ -372,47 +375,62 @@ def render_pdf(current, previous, out_path):
         pdf.multi_cell(page_w, 4, text, new_x='LMARGIN', new_y='NEXT')
 
     # --- one section per genome type ------------------------------------------------
+    headers = ['', 'Published', 'GenomeArk', 'In progress', 'Embargo', 'Embargo/Release\nunknown']
     for t, label in SECTIONS:
-        c = summary['per_type'][t]['counts']
-        raw = summary['per_type'][t]['raw']
-        heading(label)
+        info = summary['per_type'][t]
+        heading(f"{label}  ({info['total']} OGs)")
 
-        asm_headers = ['Assemblies', 'Total OGs', 'Submitted', 'Public (GCA)']
-        asm_cells = [(c['total'], f'{t}_total'), (c['uploaded'], f'{t}_uploaded'),
-                     (c['public'], f'{t}_public')]
-        if S3_ASSEMBLY_COL[t]:
-            asm_headers.append('Open data')
-            asm_cells.append((c['s3'], f'{t}_s3'))
-        asm_headers += ['In progress', 'Embargo']
-        asm_cells += [(c['release_in_progress'], None), (c['embargoed'], None)]
-        table(asm_headers, [('All', asm_cells)], label_w=26)
+        body = []
+        for row_label, measure in MEASURES:
+            c = info['measures'][measure]
+            if c is None:
+                body.append((row_label, [('-', None)] * (len(headers) - 1)))
+                continue
+            ga = c['genomeark'] if t != 'draft' else '-'
+            body.append((row_label, [
+                (c['published'], f'{t}_{measure}_published'),
+                (ga, f'{t}_{measure}_genomeark' if t != 'draft' else None),
+                (c['in_progress'], None),
+                (c['embargo'], None),
+                (c['unknown'], None),
+            ]))
+        table(headers, body, label_w=30)
 
-        if RAW_TECHS[t]:
-            pdf.ln(2)
-            if t == 'draft':
-                table(['Raw data', 'Submitted'],
-                      [(name, [(raw[tech]['submitted'], f'{t}_raw_{tech}')])
-                       for tech, name in RAW_TECHS[t]])
-                note_line('Draft genomes have no open-data bucket channel, and '
-                          'draft_genomes.sra_accession records submission only, not release state.')
-            else:
-                table(['Raw data', 'Submitted', 'Public at ENA', 'Embargoed', 'Unknown', 'Open data'],
-                      [(name, [
-                          (raw[tech]['submitted'], f'{t}_raw_{tech}'),
-                          (raw[tech]['public'], None),
-                          (raw[tech]['embargoed'], None),
-                          (raw[tech]['unknown'], None),
-                          (raw[tech]['s3'] if tech in S3_RAW_COL else '-', None),
-                      ]) for tech, name in RAW_TECHS[t]])
         if t == 'mito':
-            cohort = summary['per_type'][t]['cohort']
-            pdf.ln(2)
-            table(['Belongs to', 'OGs'],
-                  [('Reference genome OGs', [(cohort.get('reference', 0), None)]),
-                   ('Draft genome OGs', [(cohort.get('draft', 0), None)]),
-                   ('Neither on record', [(cohort.get('unknown', 0), None)])])
-            note_line('Mitogenome submissions carry assemblies only - raw reads reach ENA through '
-                      'the reference- or draft-genome pipeline that sequenced the OG.')
+            cohort = info['cohort']
+            note_line(f"No raw reads: mitogenome submissions carry assemblies only - the reads reach "
+                      f"ENA through the reference- or draft-genome pipeline that sequenced the OG. "
+                      f"{cohort.get('reference', 0)} of these OGs are reference genomes, "
+                      f"{cohort.get('draft', 0)} are draft genomes, "
+                      f"{cohort.get('unknown', 0)} are neither on record.")
+        elif t == 'draft':
+            note_line('Draft genomes are not published to GenomeArk.')
+
+    # --- what the columns mean ------------------------------------------------------
+    heading('What the columns mean')
+    for term, meaning in [
+        ('Published', 'an accession is recorded for that data at ENA/NCBI, whether or not it has '
+                      'gone public yet.'),
+        ('GenomeArk', 'also published to the open-data bucket. This is a subset of Published, so it '
+                      'is not added into the row.'),
+        ('In progress', 'cleared for release, but nothing submitted yet - the actionable backlog.'),
+        ('Embargo', 'under embargo and not submitted.'),
+        ('Embargo/Release unknown', 'no embargo decision is recorded against the sample, so it '
+                                    'cannot be actioned either way.'),
+    ]:
+        ensure_room(9)
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font('Helvetica', 'B', 8)
+        pdf.set_text_color(*TEXT_RGB)
+        w = pdf.get_string_width(term) + 2
+        pdf.cell(w, 4.6, term)
+        pdf.set_font('Helvetica', '', 8)
+        pdf.set_text_color(*MUTED_RGB)
+        pdf.multi_cell(page_w - w, 4.6, meaning, new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(1)
+    note_line('Published, In progress, Embargo and Embargo/Release unknown are mutually exclusive, '
+              'so each row adds up to the section total. Per-technology detail (HiFi, Hi-C, ONT, '
+              'Illumina) and per-OG accessions are in og_status.csv.')
 
     # --- appendix -------------------------------------------------------------------
     pdf.set_auto_page_break(False)
@@ -421,7 +439,7 @@ def render_pdf(current, previous, out_path):
     pdf.set_font('Helvetica', 'B', 11)
     pdf.set_text_color(*TEXT_RGB)
     pdf.set_x(pdf.l_margin)
-    pdf.cell(0, 7, 'Reference genomes submitted', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 7, "Reference genomes published", new_x="LMARGIN", new_y="NEXT")
 
     half_w = page_w / 2
     entry_h = 4.6
@@ -448,9 +466,9 @@ def render_pdf(current, previous, out_path):
 
     pdf.ln(3)
     ensure_room(10)
-    note_line(f"Draft genomes ({summary['per_type']['draft']['counts']['uploaded']}) and mitogenomes "
-              f"({summary['per_type']['mito']['counts']['uploaded']}) are too numerous to list here - "
-              f"see og_status.csv for the full per-OG breakdown.")
+    note_line(f"Draft genomes ({summary['per_type']['draft']['measures']['total']['published']}) and "
+              f"mitogenomes ({summary['per_type']['mito']['measures']['total']['published']}) are too "
+              f"numerous to list here - see og_status.csv for the full per-OG breakdown.")
 
     pdf.set_y(-20)
     pdf.set_draw_color(*BORDER_RGB)
