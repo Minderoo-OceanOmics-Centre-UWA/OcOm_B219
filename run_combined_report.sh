@@ -44,10 +44,8 @@ singularity run "$SING/psycopg2:0.1.sif" python3 "$SRC_DIR/action_items_report.p
 
 if [ "$CHECK_ONLY" = true ]; then
     echo
-    echo "Check-only run: nothing written to the database, no PDF generated, nothing archived."
-    echo "The open-data listing was reused as-is, not refreshed."
-    echo "Open $ACTION_ITEMS_TXT to see what needs action this quarter."
-    echo "Run without --check to fill GCAs, build the manager PDF and archive it."
+    echo "Check-only run: nothing written to the database or archived, listing reused as-is."
+    echo "Action items at $ACTION_ITEMS_TXT. Run without --check for the quarterly PDF."
 else
     echo
     echo "=== Building summary report -> $SUMMARY_PDF ==="

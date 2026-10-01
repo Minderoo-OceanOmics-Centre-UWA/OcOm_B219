@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from queries import CLASSIFY
+from queries import classify
 
 SECTIONS = [
     ('ref', 'Reference genomes'),
@@ -73,7 +73,7 @@ def on_genomeark(row, t, measure):
 def summarize(rows):
     per_type = {}
     for t, _ in SECTIONS:
-        recs = [r for r in rows if CLASSIFY[t](r.get(f'{t}_upload_status')) != 'no_record']
+        recs = [r for r in rows if classify(t, r.get(f'{t}_upload_status')) != 'no_record']
         measures = {}
         for _, measure in MEASURES:
             if not applicable(t, measure):

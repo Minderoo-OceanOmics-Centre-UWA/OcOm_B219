@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from queries import CLASSIFY, DRAFT_SQL, MITO_SQL, REF_SQL, TOLID_SQL, TYPES
+from queries import DRAFT_SQL, MITO_SQL, REF_SQL, TOLID_SQL, TYPES, classify
 
 IN_PROGRESS_LABEL = {
     'draft': 'needs raw/assembly upload to NCBI',
@@ -50,7 +50,7 @@ def build_actions(per_type_rows, tolid_rows):
             og_id = row['og_id']
             species = row.get('validated_species_name') or row.get('nominal_species_id') or '-'
             status = row.get('upload_status')
-            bucket = CLASSIFY[t](status)
+            bucket = classify(t, status)
             if bucket == 'in_progress':
                 action_label = status if t == 'mito' else IN_PROGRESS_LABEL[t]
                 actions.append((label, action_label, og_id, species))

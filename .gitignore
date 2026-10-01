@@ -1,8 +1,6 @@
 __pycache__/
 
-# reports/ is generated output; only the archived quarterly PDFs are kept.
 reports/*
 !reports/archive/
 reports/archive/*
 !reports/archive/*.pdf
-!reports/archive/.gitkeep

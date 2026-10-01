@@ -11,30 +11,17 @@ TYPES = [
 ]
 
 
-DRAFT_UPLOADED = ('all uploaded', 'submitted, awaiting GCA')
-REF_UPLOADED = ('all uploaded', 'all uploaded, public')
-MITO_UPLOADED = ('submitted, accession assigned', 'submitted, public')
+UPLOADED = {
+    'draft': ('all uploaded', 'submitted, awaiting GCA'),
+    'ref': ('all uploaded', 'all uploaded, public'),
+    'mito': ('submitted, accession assigned', 'submitted, public'),
+}
 
 
-def classify_draft(s):
-    if not s:
+def classify(genome_type, status):
+    if not status:
         return 'no_record'
-    return 'uploaded' if s in DRAFT_UPLOADED else 'in_progress'
-
-
-def classify_ref(s):
-    if not s:
-        return 'no_record'
-    return 'uploaded' if s in REF_UPLOADED else 'in_progress'
-
-
-def classify_mito(s):
-    if not s:
-        return 'no_record'
-    return 'uploaded' if s in MITO_UPLOADED else 'in_progress'
-
-
-CLASSIFY = {'draft': classify_draft, 'ref': classify_ref, 'mito': classify_mito}
+    return 'uploaded' if status in UPLOADED[genome_type] else 'in_progress'
 
 RELEASE_STATE_SQL = """
         CASE
