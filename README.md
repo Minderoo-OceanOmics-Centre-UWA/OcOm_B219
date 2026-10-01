@@ -2,22 +2,11 @@
 
 Reporting on data sharing across Ocean Genomes: reference genomes, draft genomes, and mitogenomes.
 
-This repo reports; it does not submit. The submission pipelines write accessions back to the database, and this reads them to answer one question each quarter: **what have we shared, and what is actually public?**
-
 ## Layout
 
 - `run_combined_report.sh` — the entry point
 - `scripts/`
 - `reports/` — generated output only; `reports/archive/` keeps a dated copy of the summary PDF from every run, for quarterly comparison.
-
----
-
-## Requirements
-
-- Singularity container: `$SING/psycopg2:0.1.sif`
-- PostgreSQL credentials: `~/postgresql_details/oceanomics.cfg`
-- `rclone`, configured with the `opendata:` remote — for the open-data bucket listing
-- `fpdf2` and `pypdf` for the PDF (`pip3 install --user fpdf2 pypdf`)
 
 ---
 
@@ -56,39 +45,10 @@ Four pipelines feed the columns this report reads. None of them is run from here
 | Mitogenome submission | `ENA-mito-genomes`, steps `00`–`06` | Step `06` writes `ena_submissions` and `sample.ncbi_biosample_id`. |
 | Public GCA accessions | **here**, `scripts/resolve_gca_accessions.py` | Fills all three types in one quarterly pass. Each pipeline also ships its own resolver (ref `10`, draft `07`, mito `07`); running either is fine, the writes are blank-only. |
 
-A write-back step only runs under `--prod_mode true`, so a TEST submission never reaches these tables.
-
 ### Two publication channels
 
-- **ENA/SRA** — accessions, for all three genome types.
+- **ENA/NCBI** — accessions, for all three genome types.
 - **Open-data S3 bucket** (`opendata:minderoo-oceanomics/species/`) — reference genomes and the mitogenomes published alongside them. Draft genomes have no open-data channel.
-
-They move independently, so the report shows both. Raw reads embargoed at ENA while already public on the bucket is a real and expected state, not an error.
-
----
-
-## Reading the statuses
-
-**An accession existing means the data was submitted.** Release state is reported alongside it, never as a precondition — so an embargoed OG still counts as submitted.
-
-`ref_genomes_sra_uploads.ncbi_status` carries three vocabularies at once, normalised by `RELEASE_STATE_SQL` in `scripts/queries.py`:
-
-| Value | Meaning |
-|---|---|
-| `Released` | public |
-| `ToBeReleased` | embargoed, pending |
-| a date, e.g. `2028-06-29` | the holdUntilDate written by ENA step `09`; embargoed until then, public once it has passed |
-| empty | unknown — reported as such, counted as neither |
-
-The terminal status per type, and what "public" means for each:
-
-| Type | Submitted | Public |
-|---|---|---|
-| Reference | `all uploaded` (both haplotype ERZs + raw data) | `all uploaded, public` (both haplotype GCAs) |
-| Draft | `submitted, awaiting GCA` (ERZ in `ena_analysis_accession`) | `all uploaded` (GCA in `assembly_accession`) |
-| Mitogenome | `submitted, accession assigned` | `submitted, public` (GCA in `ena_assembly_accession`) |
-
-Both count as uploaded for the headline total, so the number stays comparable with previously archived reports. Exact per-type value lists live in each script's docstring; the SQL is in `scripts/queries.py`.
 
 ---
 

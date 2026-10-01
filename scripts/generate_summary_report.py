@@ -339,24 +339,23 @@ def render_pdf(current, previous, out_path):
             for value, delta_key in cells:
                 delta = delta_for(delta_key) if delta_key else None
                 text = str(value)
-                if delta:
-                    pdf.set_font('Helvetica', '', 9)
-                    pdf.set_text_color(*TEXT_RGB)
-                    num_w = pdf.get_string_width(text) + 1
-                    d_w = 0
-                    pdf.set_font('Helvetica', '', 7)
-                    d_w = pdf.get_string_width(delta[0]) + 1
-                    pad = col_w - num_w - d_w
-                    if pad > 0:
-                        pdf.cell(pad, row_h, '')
-                    pdf.set_font('Helvetica', '', 9)
-                    pdf.set_text_color(*TEXT_RGB)
-                    pdf.cell(num_w, row_h, text, align='R')
-                    pdf.set_font('Helvetica', '', 7)
-                    pdf.set_text_color(*delta[1])
-                    pdf.cell(d_w, row_h, delta[0], align='R')
-                else:
+                # Every cell sets its own font and colour: a delta leaves them changed.
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(*TEXT_RGB)
+                if not delta:
                     pdf.cell(col_w, row_h, text, align='R')
+                    continue
+                num_w = pdf.get_string_width(text) + 1
+                pdf.set_font('Helvetica', '', 7)
+                d_w = pdf.get_string_width(delta[0]) + 1
+                pad = col_w - num_w - d_w
+                if pad > 0:
+                    pdf.cell(pad, row_h, '')
+                pdf.set_font('Helvetica', '', 9)
+                pdf.cell(num_w, row_h, text, align='R')
+                pdf.set_font('Helvetica', '', 7)
+                pdf.set_text_color(*delta[1])
+                pdf.cell(d_w, row_h, delta[0], align='R')
             pdf.ln(row_h)
             pdf.set_draw_color(*BORDER_RGB)
             pdf.set_line_width(0.2)
