@@ -26,12 +26,11 @@ Both write to `reports/`:
 - `og_status.csv` / `og_status_flagged.csv` — full per-OG data.
 - `og_status_action_items.txt` — a to-do list grouped by genome type then action category (e.g. "needs NCBI taxon ID", "needs ToLID request"), with the OGs needing each action listed underneath. Full category list: each `data_quality_flag` in `scripts/queries.py`.
 
-`--check` is read-only and safe to re-run as often as you like: it writes nothing to the database, never touches `reports/archive/`, and reuses the cached bucket listing rather than re-fetching it.
+`--check` is safe to re-run as often as you like: it never touches `reports/archive/` and reuses the cached bucket listing rather than re-fetching it. It is **not** read-only — like the full run, it first backfills any newly-issued GCA accessions (`resolve_gca_accessions.py`), so the report never reports an assembly as unpublished when ENA has already published it. That write is blank-only: it only fills a missing accession and never overwrites or clears one, so a differing value is reported as a conflict instead.
 
 The run without `--check` is the single official quarterly run. It additionally:
 1. refreshes the open-data bucket listing,
-2. fills in any newly-issued GCA accessions (`resolve_gca_accessions.py` — this writes to the database),
-3. builds `og_status_summary.pdf` and archives a dated copy.
+2. builds `og_status_summary.pdf` and archives a dated copy.
 
 ---
 
@@ -45,7 +44,7 @@ Four pipelines feed the columns this report reads. None of them is run from here
 | Reference genome submission | `ENA-ref-genomes`, steps `00`–`09` | Step `09` writes `sample`, `ref_genomes_assembly_uploads`, `ref_genomes_sra_uploads`. |
 | Draft genome submission | `ENA-draft-genomes`, steps `00`–`06` | Step `06` writes `sample.ncbi_biosample_id` and `draft_genomes`. |
 | Mitogenome submission | `ENA-mito-genomes`, steps `00`–`06` | Step `06` writes `ena_submissions` and `sample.ncbi_biosample_id`. |
-| Public GCA accessions | **here**, `scripts/resolve_gca_accessions.py` | Fills all three types in one quarterly pass. Each pipeline also ships its own resolver (ref `10`, draft `07`, mito `07`); running either is fine, the writes are blank-only. |
+| Public GCA accessions | **here**, `scripts/resolve_gca_accessions.py` | Fills all three types in one quarterly pass, as the first step of `run_combined_report.sh`, so the report reads current data. Each pipeline also ships its own resolver (ref `10`, draft `07`, mito `07`); running either is fine, the writes are blank-only. |
 
 ### Two publication channels
 
@@ -71,7 +70,7 @@ singularity run $SING/psycopg2:0.1.sif python scripts/<script.py> \
 | `combined_upload_status.py` | All three pivoted to one row per OG |
 | `action_items_report.py` | The quarterly to-do list, grouped by action |
 | `generate_summary_report.py` | The manager-facing PDF (reads the combined CSV, no DB access) |
-| `resolve_gca_accessions.py` | Fills public GCA accessions for all three types. `--dry-run` to preview |
+| `resolve_gca_accessions.py` | Fills public GCA accessions for all three types. `--dry-run` to preview. Kept self-contained so this repo runs without the pipelines checked out; its matching and write logic duplicates theirs, so **edit it together with** `ENA-ref-genomes/workflow/10_*`, `ENA-draft-genomes/workflow/07_*` and `ENA-mito-genomes/workflow/07_*` |
 | `public_release.py` | Refreshes and reads the open-data bucket listing |
 | `backfill_ncbi_taxon_id.py` | Fills `sample.ncbi_id` from `master_species`. `--dry-run` to preview |
 
@@ -79,24 +78,50 @@ The three per-type scripts each write a timestamped CSV + flagged-only CSV to `r
 
 ---
 
-## Database tables used
+## Which row each OG is reported on
 
-| Table | Description |
-|-------|-------------|
-| `ref_genomes_assembly_uploads` / `ref_genomes_sra_uploads` / `ref_genomes` | Reference genome accessions, raw-data release state, and stage |
-| `draft_genomes` | Draft genome assembly metrics and accessions (`ena_analysis_accession` is the ERZ, `assembly_accession` the public GCA) |
-| `mitogenome_data` | Mitogenome assembly records (identity/QC fields only — `genbank_accession` is dead, no longer written) |
-| `ena_validation_latest` | Flatfile format validation per mitogenome assembly (drives `ready to submit`) |
-| `ena_submissions` | ENA submission ledger for mitogenomes (drives `submitted, ...` statuses) |
-| `lca_validation` | Validated species names per OG |
-| `sample` | Sample metadata, ToLID, workflow, and embargo status |
-| `master_species` | NCBI taxon IDs (used only by `backfill_ncbi_taxon_id.py`) |
+Every OG has several candidate rows (sequencing runs, techs, assembly codes, haplotypes), but the
+report shows one status per OG per genome type. The pick **prefers a row that has a submission**,
+and only falls back to recency when no row does. Without that preference the report claimed an OG
+was unsubmitted whenever its published assembly sat on a row the pick passed over — it was
+undercounting 9 OGs (7 mito, 1 draft, 1 ref) as of 2026-11-12.
+
+| Type | Pick order |
+|------|-----------|
+| mito | tech with a production `ena_submissions` row first, else `hifi` > `hic` > `ilmn`; within a tech, the submitted row first, then newest `seq_date`, then `code` |
+| draft | row with any accession first, then one with an `ilmn` validation matching `seq_date`, then newest `seq_date` (parsed as `YYMMDD`; non-conforming values rank last) |
+| ref | stage-3 OGs **plus** any OG with a row in `ref_genomes_assembly_uploads`, so a published genome still counts if its recorded stage is not 3 |
+
+`draft_genome.seq_date` is text and not always a date — `230419-genomescope` exists and used to
+outrank the real `230419` row under a plain string sort. The draft pick parses it instead, but the
+2 affected rows are worth correcting at source.
+
+---
+
+## Database relations used
+
+All reporting reads from views. Only `resolve_gca_accessions.py` and `backfill_ncbi_taxon_id.py`
+write, and they write to base tables — the views below are not updatable, so an `UPDATE` against
+one fails with `cannot update view`.
+
+| Relation | Kind | Description |
+|----------|------|-------------|
+| `ref_genomes_assembly_uploads` / `ref_genomes_sra_uploads` / `ref_genomes` | view | Reference genome accessions, raw-data release state, and stage |
+| `draft_genomes` | view | Draft genome assembly metrics and accessions (`ena_analysis_accession` is the ERZ, `assembly_accession` the public GCA) |
+| `mitogenome_data` | view | Mitogenome assembly records (identity/QC fields only — `genbank_accession` no longer exists; ENA accessions come from `ena_submissions`) |
+| `ena_validation_latest` | view | Flatfile format validation per mitogenome assembly (drives `ready to submit`) |
+| `lca_validation` | view | Validated species names per OG |
+| `ena_submissions` | table | ENA submission ledger for mitogenomes (drives `submitted, ...` statuses); mito GCA is written here |
+| `sample` | table | Sample metadata, ToLID, workflow, and embargo status; `ncbi_id` is written here |
+| `master_species` | table | NCBI taxon IDs (used only by `backfill_ncbi_taxon_id.py`) |
+| `ref_submission` / `ref_submission_haplotype` | table | Base tables behind `ref_genomes_assembly_uploads`; ref GCA is written to `ref_submission_haplotype.gca_accession`, keyed by `haplotype` |
+| `draft_genome` / `draft_submission` | table | Base tables behind `draft_genomes`; draft GCA is written to `draft_submission.assembly_accession`, with `draft_id` resolved from `draft_genome (og_id, seq_date)` |
 
 ---
 
 ## Each quarter
 
-1. `--check` during the quarter; work through `og_status_action_items.txt`.
+1. `--check` during the quarter; work through `og_status_action_items.txt`. Each run also backfills any GCA accessions ENA has issued since the last one, so running it often keeps the database current.
 2. When the submissions for the quarter are done, run without `--check`.
 3. View summary report under `reports/og_status_summary.pdf`.
 4. Commit and push the archived PDF — next quarter's report reads its embedded counts to compute deltas, and scratch is not durable storage.

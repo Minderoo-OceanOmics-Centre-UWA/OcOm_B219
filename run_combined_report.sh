@@ -28,11 +28,13 @@ LISTING="$REPORTS_DIR/public_release_listing.txt"
 if [ "$CHECK_ONLY" = false ]; then
     echo "=== Refreshing the open-data bucket listing -> $LISTING ==="
     python3 "$SRC_DIR/public_release.py" "$LISTING"
-
     echo
-    echo "=== Filling GCA accessions from ENA (writes to the DB) ==="
-    singularity run "$SING/psycopg2:0.1.sif" python3 "$SRC_DIR/resolve_gca_accessions.py" "$CONFIG"
 fi
+
+# Runs in both modes: the report is only as current as the accessions, and the write is
+# blank-only, so there is nothing to hold back during the quarter.
+echo "=== Filling GCA accessions from ENA (writes to the DB) ==="
+singularity run "$SING/psycopg2:0.1.sif" python3 "$SRC_DIR/resolve_gca_accessions.py" "$CONFIG"
 
 echo
 echo "=== Querying DB -> $OUT_CSV ==="
@@ -44,7 +46,8 @@ singularity run "$SING/psycopg2:0.1.sif" python3 "$SRC_DIR/action_items_report.p
 
 if [ "$CHECK_ONLY" = true ]; then
     echo
-    echo "Check-only run: nothing written to the database or archived, listing reused as-is."
+    echo "Check-only run: GCA accessions were backfilled, but no PDF was built or archived"
+    echo "and the open-data listing was reused as-is."
     echo "Action items at $ACTION_ITEMS_TXT. Run without --check for the quarterly PDF."
 else
     echo

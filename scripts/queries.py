@@ -52,7 +52,15 @@ latest AS (
     SELECT DISTINCT ON (dg.og_id) dg.*
     FROM draft_genomes dg
     LEFT JOIN validation_match vm ON vm.og_id = dg.og_id AND vm.seq_date = dg.seq_date
-    ORDER BY dg.og_id, (vm.seq_date IS NOT NULL) DESC, dg.seq_date DESC
+    ORDER BY dg.og_id,
+             (NULLIF(dg.biosample_accession, '')      IS NOT NULL
+              OR NULLIF(dg.sra_accession, '')         IS NOT NULL
+              OR NULLIF(dg.ena_analysis_accession, '') IS NOT NULL
+              OR NULLIF(dg.assembly_accession, '')     IS NOT NULL) DESC,
+             (vm.seq_date IS NOT NULL) DESC,
+             (CASE WHEN dg.seq_date ~ '^[0-9]{6}$'
+                   THEN TO_DATE(dg.seq_date, 'YYMMDD') END) DESC NULLS LAST,
+             dg.seq_date DESC
 ),
 matched AS (
     SELECT DISTINCT ON (lv.og_id)
@@ -133,6 +141,8 @@ WITH rg3 AS (
 ),
 stage3_ogs AS (
     SELECT DISTINCT og_id FROM ref_genomes WHERE stage = 3
+    UNION
+    SELECT DISTINCT og_id FROM ref_genomes_assembly_uploads
 ),
 stage3_seqdates AS (
     SELECT og_id, MIN(seq_date) AS min_seq_date, MAX(seq_date) AS max_seq_date
@@ -312,7 +322,6 @@ WITH base AS (
       m.seq_date,
       m.code,
       m.annotation,
-      m.genbank_accession,
       s.embargo_status,
       s.nominal_species_id,
       s.ncbi_id,
@@ -325,14 +334,15 @@ WITH base AS (
         ELSE 'unknown'
       END AS cohort,
       CASE
-        WHEN m.genbank_accession IS NOT NULL
-             AND BTRIM(m.genbank_accession) <> '' THEN 1
-        ELSE 0
-      END AS has_accession,
-      CASE
         WHEN m.seq_date ~ '^[0-9]{6}$' THEN TO_DATE(m.seq_date, 'YYMMDD')
         ELSE NULL
-      END AS seq_date_dt
+      END AS seq_date_dt,
+      EXISTS (
+        SELECT 1 FROM ena_submissions es
+        WHERE es.og_id = m.og_id AND es.tech = m.tech AND es.seq_date = m.seq_date
+          AND es.code = m.code AND es.annotation = m.annotation
+          AND es.webin_mode = 'production'
+      ) AS has_submission
   FROM mitogenome_data m
   LEFT JOIN sample s ON s.og_id = m.og_id
   WHERE m.og_id NOT LIKE '%_concat%'
@@ -344,7 +354,8 @@ dedup AS (
       b.*,
       ROW_NUMBER() OVER (
         PARTITION BY b.og_id, LOWER(b.tech)
-        ORDER BY b.seq_date_dt DESC NULLS LAST, b.seq_date DESC, b.code DESC
+        ORDER BY b.has_submission DESC,
+                 b.seq_date_dt DESC NULLS LAST, b.seq_date DESC, b.code DESC
       ) AS rn
     FROM base b
   ) x
@@ -355,7 +366,10 @@ og_flags AS (
     og_id,
     MAX(CASE WHEN LOWER(tech) = 'hifi' THEN 1 ELSE 0 END) AS has_hifi,
     MAX(CASE WHEN LOWER(tech) = 'hic'  THEN 1 ELSE 0 END) AS has_hic,
-    MAX(CASE WHEN LOWER(tech) = 'ilmn' THEN 1 ELSE 0 END) AS has_ilmn
+    MAX(CASE WHEN LOWER(tech) = 'ilmn' THEN 1 ELSE 0 END) AS has_ilmn,
+    MAX(CASE WHEN LOWER(tech) = 'hifi' AND has_submission THEN 1 ELSE 0 END) AS sub_hifi,
+    MAX(CASE WHEN LOWER(tech) = 'hic'  AND has_submission THEN 1 ELSE 0 END) AS sub_hic,
+    MAX(CASE WHEN LOWER(tech) = 'ilmn' AND has_submission THEN 1 ELSE 0 END) AS sub_ilmn
   FROM dedup
   GROUP BY og_id
 ),
@@ -363,6 +377,9 @@ chosen AS (
   SELECT
     d.*,
     CASE
+      WHEN f.sub_hifi = 1 THEN 'hifi'
+      WHEN f.sub_hic  = 1 THEN 'hic'
+      WHEN f.sub_ilmn = 1 THEN 'ilmn'
       WHEN f.has_hifi = 1 THEN 'hifi'
       WHEN f.has_hic  = 1 THEN 'hic'
       WHEN f.has_ilmn = 1 THEN 'ilmn'
@@ -411,7 +428,6 @@ SELECT
   pk.tech,
   pk.seq_date,
   pk.code,
-  pk.genbank_accession,
   pk.embargo_status,
   pk.nominal_species_id,
   pk.tol_id,

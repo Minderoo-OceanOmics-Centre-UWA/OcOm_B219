@@ -4,11 +4,21 @@
 ENA issues the GCA hours to days after accepting an ERZ, so the submission pipelines
 can only record the ERZ. This fills all three genome types in one pass:
 
-    ref    ref_genomes_assembly_uploads.gca_accession_hap1 / _hap2
-    draft  draft_genomes.assembly_accession
+    ref    ref_submission_haplotype.gca_accession (per haplotype)
+    draft  draft_submission.assembly_accession
     mito   ena_submissions.ena_assembly_accession
 
+Reads go through the ref_genomes_assembly_uploads / draft_genomes views; the writes go to
+the base tables behind them, since those views are not updatable.
+
 Writes are blank-only; a differing existing value is reported as a conflict.
+
+Kept deliberately self-contained so this repo runs without the submission pipelines checked
+out. The matching and write logic is a copy of theirs and must be kept in step with:
+
+    ENA-ref-genomes/workflow/10_resolve_gca_accessions.py
+    ENA-draft-genomes/workflow/07_resolve_gca_accessions.py
+    ENA-mito-genomes/workflow/07_resolve_gca_accessions.py
 
 Usage:
     singularity run $SING/psycopg2:0.1.sif python resolve_gca_accessions.py \
@@ -169,12 +179,12 @@ def resolve_ref(cur, conn, dry_run):
             if existing not in (cands[0]['accession'], gca_full):
                 rep.conflicts.append((name, existing, gca_full))
             continue
-        col = f"gca_accession_hap{hap}"
         write_blank_only(
             cur, conn,
-            f"UPDATE ref_genomes_assembly_uploads SET {col}=%s "
-            f"WHERE og_id=%s AND NULLIF({col},'') IS NULL",
-            (gca_full, og_id), name, dry_run)
+            "UPDATE ref_submission_haplotype h SET gca_accession=%s, loaded_at=now() "
+            "FROM ref_submission s WHERE s.submission_id=h.submission_id "
+            "AND s.og_id=%s AND h.haplotype=%s AND NULLIF(h.gca_accession,'') IS NULL",
+            (gca_full, og_id, f"hap{hap}"), name, dry_run)
         rep.written.append((name, gca_full))
     return rep
 
@@ -219,8 +229,11 @@ def resolve_draft(cur, conn, dry_run, study=DRAFT_STUDY):
             continue
         write_blank_only(
             cur, conn,
-            "UPDATE draft_genomes SET assembly_accession=%s "
-            "WHERE og_id=%s AND seq_date=%s AND NULLIF(assembly_accession,'') IS NULL",
+            "INSERT INTO draft_submission (draft_id, assembly_accession) "
+            "SELECT g.draft_id, %s FROM draft_genome g WHERE g.og_id = %s AND g.seq_date = %s "
+            "ON CONFLICT (draft_id) DO UPDATE SET assembly_accession = EXCLUDED.assembly_accession, "
+            "loaded_at = now() "
+            "WHERE NULLIF(draft_submission.assembly_accession, '') IS NULL",
             (gca_full, og_id, seq_date), f"{og_id} {seq_date}", dry_run)
         rep.written.append((og_id, gca_full))
     return rep
