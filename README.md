@@ -90,7 +90,7 @@ for that OG (see the next section).
 | 2 | `species mismatch: validated vs nominal` | the validated name differs from `sample.nominal_species_id` |
 | 3 | `flatfile not validated for ENA` | mitogenomes only — `ena_validation_latest.submission_ready` is false |
 | 4 | `missing taxon ID` | `sample.ncbi_id` is blank or not numeric |
-| 5 | `missing ToLID` | `sample.tol_id` is blank or is not a ToLID — 3 rows hold a status note such as `Requested 11/06/2024` |
+| 5 | `missing ToLID` | reference genomes only — `sample.tol_id` is blank or is not a ToLID. 3 rows hold a status note such as `Requested 11/06/2024`. Draft and mitogenome submissions do not need one |
 | — | `ready to submit` | nothing above matched |
 
 Validation comes first because the rest is wasted effort on an OG whose species is not

@@ -124,9 +124,6 @@ SELECT
         WHEN NULLIF(s.ncbi_id::text, '') IS NULL
           OR s.ncbi_id::text !~ '^[0-9]+(\.0)?$'
             THEN 'missing taxon ID'
-        WHEN NULLIF(BTRIM(s.tol_id), '') IS NULL
-          OR s.tol_id !~ '^[a-z][A-Za-z]{6}[0-9]+$'
-            THEN 'missing ToLID'
     END AS blocking_action,
     (dg.sra_accession IS NOT NULL AND dg.sra_accession ~* '^(SRR|ERR)') AS raw_submitted,
     (NULLIF(dg.ena_analysis_accession, '') IS NOT NULL
@@ -497,9 +494,6 @@ SELECT
     WHEN NULLIF(pk.ncbi_id::text, '') IS NULL
       OR pk.ncbi_id::text !~ '^[0-9]+(\.0)?$'
         THEN 'missing taxon ID'
-    WHEN NULLIF(BTRIM(pk.tol_id), '') IS NULL
-      OR pk.tol_id !~ '^[a-z][A-Za-z]{6}[0-9]+$'
-        THEN 'missing ToLID'
   END AS blocking_action,
   CASE
     WHEN NULLIF(BTRIM(es.ena_assembly_accession), '') IS NOT NULL THEN 'submitted, public'
