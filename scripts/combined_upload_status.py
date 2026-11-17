@@ -44,7 +44,8 @@ S3_COLS = ['s3_assemblies', 's3_mito', 's3_raw_hifi', 's3_raw_hic']
 
 COMBINED_COLS = (
     ['og_id', 'species', 'tol_id', 'embargo_status']
-    + [c for t in TYPES for c in ([f'{t}_upload_status', f'{t}_data_quality_flag'] + list(EXTRA_COLS[t]))]
+    + [c for t in TYPES for c in ([f'{t}_upload_status', f'{t}_data_quality_flag',
+                                   f'{t}_blocking_action'] + list(EXTRA_COLS[t]))]
     + S3_COLS
     + ['generated_at']
 )
@@ -109,6 +110,7 @@ def main():
             rec = per_type[t].get(og_id) or {}
             row.append(rec.get('upload_status'))
             row.append(rec.get('data_quality_flag'))
+            row.append(rec.get('blocking_action'))
             for src in EXTRA_COLS[t].values():
                 row.append(rec.get(src))
 

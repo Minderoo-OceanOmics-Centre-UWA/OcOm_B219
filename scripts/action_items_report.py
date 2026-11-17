@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Action items report - a to-do list of OGs and what is needed next.
 
-Each non-uploaded upload_status becomes a plain-language action and each
-data_quality_flag becomes its own action, plus the ToLID/NCBI taxon funnel
-(TOLID_SQL). Only OGs with embargo_status = 'Release' are included.
+Every assembled, unsubmitted OG gets exactly one action: the first unmet gate of the
+readiness funnel in queries.py (blocking_action), or "ready to submit" when nothing
+blocks it. One action per OG is what makes each category a work queue rather than an
+overlapping flag list. Only OGs with embargo_status = 'Release' are included; the
+number held back by embargo is reported per section.
 
 Usage:
     singularity run $SING/psycopg2:0.1.sif python3 action_items_report.py \
@@ -19,14 +21,18 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from queries import DRAFT_SQL, MITO_SQL, REF_SQL, TOLID_SQL, TYPES, classify
+from queries import DRAFT_SQL, MITO_SQL, REF_SQL, TYPES, classify
 
-IN_PROGRESS_LABEL = {
-    'draft': 'needs raw/assembly upload to NCBI',
-    'ref': 'needs upload to NCBI',
-}
+READY = 'ready to submit'
 
-TOLID_GENOME_TYPE = 'Reference genomes'
+ACTION_ORDER = [
+    READY,
+    'species name not validated',
+    'species mismatch: validated vs nominal',
+    'flatfile not validated for ENA',
+    'missing taxon ID',
+    'missing ToLID',
+]
 
 BLOCK_ORDER = ['Reference genomes', 'Mitogenomes', 'Draft genomes']
 
@@ -38,43 +44,29 @@ def fetch(cur, sql):
     return [dict(zip(cols, r)) for r in rows]
 
 
-def build_actions(per_type_rows, tolid_rows):
-    """Returns list of (genome_type, action_label, og_id, species) tuples."""
+def build_actions(per_type_rows):
+    """Returns (actions, embargoed): one (genome_type, action, og_id, species) per OG,
+    and {genome_type: count} held back by embargo."""
     actions = []
-    no_validation_ogs = set()
+    embargoed = defaultdict(int)
 
     for t, label in TYPES:
         for row in per_type_rows[t]:
-            if row.get('embargo_status') != 'Release':
+            if classify(t, row.get('upload_status')) != 'in_progress':
                 continue
-            og_id = row['og_id']
+            if row.get('embargo_status') != 'Release':
+                embargoed[label] += 1
+                continue
             species = row.get('validated_species_name') or row.get('nominal_species_id') or '-'
-            status = row.get('upload_status')
-            bucket = classify(t, status)
-            if bucket == 'in_progress':
-                action_label = status if t == 'mito' else IN_PROGRESS_LABEL[t]
-                actions.append((label, action_label, og_id, species))
+            actions.append((label, row.get('blocking_action') or READY, row['og_id'], species))
 
-            flag = row.get('data_quality_flag')
-            if flag:
-                for part in flag.split(', '):
-                    actions.append((label, part, og_id, species))
-                    if t == 'draft' and part == 'no validated species name recorded':
-                        no_validation_ogs.add(og_id)
+    return actions, embargoed
 
-    for row in tolid_rows:
-        if row.get('embargo_status') != 'Release':
-            continue
-        action = row.get('action_needed')
-        if not action:
-            continue
-        og_id = row['og_id']
-        if action == 'needs species validation' and og_id in no_validation_ogs:
-            continue
-        species = row.get('validated_species_name') or row.get('nominal_species_id') or '-'
-        actions.append((TOLID_GENOME_TYPE, action, og_id, species))
 
-    return actions
+def action_sort_key(action_label):
+    if action_label in ACTION_ORDER:
+        return (ACTION_ORDER.index(action_label), action_label)
+    return (len(ACTION_ORDER), action_label)
 
 
 def group_actions(actions):
@@ -88,7 +80,7 @@ def group_actions(actions):
     return grouped
 
 
-def render_text(grouped, generated_at):
+def render_text(grouped, embargoed, generated_at):
     lines = [
         'OceanGenomes action items',
         f'Generated {generated_at}',
@@ -103,7 +95,11 @@ def render_text(grouped, generated_at):
         lines.append(header)
         lines.append('=' * len(header))
         lines.append('')
-        for action_label in sorted(by_action):
+        held = embargoed.get(genome_type, 0)
+        total = sum(len(e) for e in by_action.values())
+        lines.append(f'{total} assembled and unsubmitted; {held} more held back by embargo')
+        lines.append('')
+        for action_label in sorted(by_action, key=action_sort_key):
             entries = by_action[action_label]
             lines.append(f'{action_label} ({len(entries)} OGs)')
             lines.append('-' * len(f'{action_label} ({len(entries)} OGs)'))
@@ -120,7 +116,7 @@ def print_summary(grouped):
         if not by_action:
             continue
         print(f"\n  {genome_type}:")
-        for action_label in sorted(by_action):
+        for action_label in sorted(by_action, key=action_sort_key):
             print(f"    {action_label}: {len(by_action[action_label])}")
 
 
@@ -140,10 +136,9 @@ def main():
         'ref': fetch(cur, REF_SQL),
         'mito': fetch(cur, MITO_SQL),
     }
-    tolid_rows = fetch(cur, TOLID_SQL)
     conn.close()
 
-    actions = build_actions(per_type_rows, tolid_rows)
+    actions, embargoed = build_actions(per_type_rows)
     grouped = group_actions(actions)
 
     out_path = (Path(sys.argv[2]) if len(sys.argv) > 2
@@ -151,7 +146,7 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     generated_at = datetime.now().astimezone().isoformat(timespec='seconds')
-    out_path.write_text(render_text(grouped, generated_at))
+    out_path.write_text(render_text(grouped, embargoed, generated_at))
 
     distinct_ogs = len(set(a[2] for a in actions))
     print(f"Written to {out_path} ({len(actions)} action entries across {distinct_ogs} OGs)")

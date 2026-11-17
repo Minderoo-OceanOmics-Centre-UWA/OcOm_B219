@@ -24,7 +24,7 @@ bash run_combined_report.sh ~/postgresql_details/oceanomics.cfg
 
 Both write to `reports/`:
 - `og_status.csv` / `og_status_flagged.csv` — full per-OG data.
-- `og_status_action_items.txt` — a to-do list grouped by genome type then action category (e.g. "needs NCBI taxon ID", "needs ToLID request"), with the OGs needing each action listed underneath. Full category list: each `data_quality_flag` in `scripts/queries.py`.
+- `og_status_action_items.txt` — a to-do list grouped by genome type then action, with the OGs needing each action listed underneath. Every assembled, unsubmitted OG appears **exactly once per genome type**, so each action is a work queue and the category counts sum to the section total. Each section also reports how many OGs are held back by embargo rather than by anything you can act on.
 
 `--check` is safe to re-run as often as you like: it never touches `reports/archive/` and reuses the cached bucket listing rather than re-fetching it. It is **not** read-only — like the full run, it first backfills any newly-issued GCA accessions (`resolve_gca_accessions.py`), so the report never reports an assembly as unpublished when ENA has already published it. That write is blank-only: it only fills a missing accession and never overwrites or clears one, so a differing value is reported as a conflict instead.
 
@@ -78,6 +78,33 @@ The three per-type scripts each write a timestamped CSV + flagged-only CSV to `r
 
 ---
 
+## What each OG is waiting on
+
+`blocking_action` in `scripts/queries.py` gives each assembled, unsubmitted OG one action:
+the first gate below that it fails. First match wins, evaluated on the row the report picks
+for that OG (see the next section).
+
+| # | Action | Condition |
+|---|---|---|
+| 1 | `species name not validated` | unless `lca_validation` has a `validated_species_name` **and** both `validator` and `validator_2` are filled, it lands here |
+| 2 | `species mismatch: validated vs nominal` | the validated name differs from `sample.nominal_species_id` |
+| 3 | `flatfile not validated for ENA` | mitogenomes only — `ena_validation_latest.submission_ready` is false |
+| 4 | `missing taxon ID` | `sample.ncbi_id` is blank or not numeric |
+| 5 | `missing ToLID` | `sample.tol_id` is blank or is not a ToLID — 3 rows hold a status note such as `Requested 11/06/2024` |
+| — | `ready to submit` | nothing above matched |
+
+Validation comes first because the rest is wasted effort on an OG whose species is not
+settled, and the two validator columns are both required: `mito_lca_validation` records
+that "submission needs both". Blank and malformed values share an action because they are
+the same job. The report is deliberately stricter than `ENA-ref-genomes` and
+`ENA-mito-genomes`, which do not check either validator; `ENA-draft-genomes` does, and
+already excludes any row carrying a data quality flag.
+
+`data_quality_flag` is unchanged and still drives `og_status_flagged.csv` — it describes
+data problems, whereas `blocking_action` describes what to do next.
+
+---
+
 ## Which row each OG is reported on
 
 Every OG has several candidate rows (sequencing runs, techs, assembly codes, haplotypes), but the
@@ -110,7 +137,7 @@ one fails with `cannot update view`.
 | `draft_genomes` | view | Draft genome assembly metrics and accessions (`ena_analysis_accession` is the ERZ, `assembly_accession` the public GCA) |
 | `mitogenome_data` | view | Mitogenome assembly records (identity/QC fields only — `genbank_accession` no longer exists; ENA accessions come from `ena_submissions`) |
 | `ena_validation_latest` | view | Flatfile format validation per mitogenome assembly (drives `ready to submit`) |
-| `lca_validation` | view | Validated species names per OG |
+| `lca_validation` | view | Validated species names per OG; `validator` and `validator_2` drive readiness, and both are required |
 | `ena_submissions` | table | ENA submission ledger for mitogenomes (drives `submitted, ...` statuses); mito GCA is written here |
 | `sample` | table | Sample metadata, ToLID, workflow, and embargo status; `ncbi_id` is written here |
 | `master_species` | table | NCBI taxon IDs (used only by `backfill_ncbi_taxon_id.py`) |

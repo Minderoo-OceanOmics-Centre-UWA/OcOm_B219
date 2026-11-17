@@ -66,7 +66,9 @@ matched AS (
     SELECT DISTINCT ON (lv.og_id)
         lv.og_id,
         lv.tech,
-        lv.validated_species_name
+        lv.validated_species_name,
+        lv.validator,
+        lv.validator_2
     FROM lca_validation lv
     JOIN latest dg ON dg.og_id = lv.og_id AND dg.seq_date = lv.seq_date
     WHERE lv.tech = 'ilmn'
@@ -76,7 +78,7 @@ matched AS (
 ),
 fallback AS (
     SELECT DISTINCT ON (og_id)
-        og_id, tech, validated_species_name
+        og_id, tech, validated_species_name, validator, validator_2
     FROM lca_validation
     WHERE validated_species_name IS NOT NULL
       AND validated_species_name <> ''
@@ -87,7 +89,9 @@ validated AS (
         l.og_id,
         COALESCE(m.validated_species_name, f.validated_species_name) AS validated_species_name,
         (f.og_id IS NULL) AS no_validation,
-        (f.og_id IS NOT NULL AND m.og_id IS NULL) AS used_fallback
+        (f.og_id IS NOT NULL AND m.og_id IS NULL) AS used_fallback,
+        (NULLIF(BTRIM(COALESCE(m.validator, f.validator)::text), '')   IS NOT NULL) AS has_validator,
+        (NULLIF(BTRIM(COALESCE(m.validator_2, f.validator_2)::text), '') IS NOT NULL) AS has_validator_2
     FROM latest l
     LEFT JOIN matched m ON m.og_id = l.og_id
     LEFT JOIN fallback f ON f.og_id = l.og_id
@@ -110,6 +114,20 @@ SELECT
              THEN 'species mismatch: validated vs nominal' END,
         CASE WHEN NULLIF(s.ncbi_id::text, '') IS NULL THEN 'missing ncbi_id' END
     ) AS data_quality_flag,
+    CASE
+        WHEN v.no_validation
+          OR NOT COALESCE(v.has_validator, false)
+          OR NOT COALESCE(v.has_validator_2, false)
+            THEN 'species name not validated'
+        WHEN v.validated_species_name IS DISTINCT FROM s.nominal_species_id
+            THEN 'species mismatch: validated vs nominal'
+        WHEN NULLIF(s.ncbi_id::text, '') IS NULL
+          OR s.ncbi_id::text !~ '^[0-9]+(\.0)?$'
+            THEN 'missing taxon ID'
+        WHEN NULLIF(BTRIM(s.tol_id), '') IS NULL
+          OR s.tol_id !~ '^[a-z][A-Za-z]{6}[0-9]+$'
+            THEN 'missing ToLID'
+    END AS blocking_action,
     (dg.sra_accession IS NOT NULL AND dg.sra_accession ~* '^(SRR|ERR)') AS raw_submitted,
     (NULLIF(dg.ena_analysis_accession, '') IS NOT NULL
      OR NULLIF(dg.assembly_accession, '') IS NOT NULL) AS assembly_published,
@@ -156,7 +174,8 @@ matched AS (
         lv.tech,
         lv.seq_date,
         lv.validated_species_name,
-        lv.validator
+        lv.validator,
+        lv.validator_2
     FROM lca_validation lv
     WHERE lv.tech IN ('hifi', 'hic')
       AND lv.validated_species_name IS NOT NULL
@@ -173,7 +192,8 @@ fallback AS (
         og_id,
         tech,
         validated_species_name,
-        validator
+        validator,
+        validator_2
     FROM lca_validation
     WHERE validated_species_name IS NOT NULL
       AND validated_species_name <> ''
@@ -186,7 +206,9 @@ validated AS (
         COALESCE(m.validated_species_name, f.validated_species_name) AS validated_species_name,
         COALESCE(m.validator, f.validator) AS validator,
         (f.og_id IS NULL) AS no_validation,
-        (f.og_id IS NOT NULL AND m.og_id IS NULL) AS used_fallback
+        (f.og_id IS NOT NULL AND m.og_id IS NULL) AS used_fallback,
+        (NULLIF(BTRIM(COALESCE(m.validator, f.validator)::text), '')     IS NOT NULL) AS has_validator,
+        (NULLIF(BTRIM(COALESCE(m.validator_2, f.validator_2)::text), '') IS NOT NULL) AS has_validator_2
     FROM stage3_ogs o
     LEFT JOIN matched m ON m.og_id = o.og_id
     LEFT JOIN fallback f ON f.og_id = o.og_id
@@ -264,6 +286,20 @@ SELECT
         CASE WHEN sd.min_seq_date IS DISTINCT FROM sd.max_seq_date
              THEN 'hap1/hap2 stage-3 seq_date inconsistent' END
     ) AS data_quality_flag,
+    CASE
+        WHEN v.no_validation
+          OR NOT COALESCE(v.has_validator, false)
+          OR NOT COALESCE(v.has_validator_2, false)
+            THEN 'species name not validated'
+        WHEN v.validated_species_name IS DISTINCT FROM s.nominal_species_id
+            THEN 'species mismatch: validated vs nominal'
+        WHEN NULLIF(s.ncbi_id::text, '') IS NULL
+          OR s.ncbi_id::text !~ '^[0-9]+(\.0)?$'
+            THEN 'missing taxon ID'
+        WHEN NULLIF(BTRIM(s.tol_id), '') IS NULL
+          OR s.tol_id !~ '^[a-z][A-Za-z]{6}[0-9]+$'
+            THEN 'missing ToLID'
+    END AS blocking_action,
     CASE
         WHEN u.og_id IS NULL
          AND NULLIF(s.ncbi_biosample_id, '') IS NULL
@@ -394,7 +430,9 @@ picked AS (
 matched AS (
   SELECT DISTINCT ON (lv.og_id)
       lv.og_id,
-      lv.validated_species_name
+      lv.validated_species_name,
+      lv.validator,
+      lv.validator_2
   FROM lca_validation lv
   JOIN picked pk
     ON pk.og_id = lv.og_id
@@ -406,7 +444,7 @@ matched AS (
 ),
 fallback AS (
   SELECT DISTINCT ON (og_id)
-      og_id, validated_species_name
+      og_id, validated_species_name, validator, validator_2
   FROM lca_validation
   WHERE validated_species_name IS NOT NULL
     AND validated_species_name <> ''
@@ -417,7 +455,9 @@ validated AS (
       pk.og_id,
       COALESCE(m.validated_species_name, f.validated_species_name) AS validated_species_name,
       (f.og_id IS NULL) AS no_validation,
-      (f.og_id IS NOT NULL AND m.og_id IS NULL) AS used_fallback
+      (f.og_id IS NOT NULL AND m.og_id IS NULL) AS used_fallback,
+      (NULLIF(BTRIM(COALESCE(m.validator, f.validator)::text), '')     IS NOT NULL) AS has_validator,
+      (NULLIF(BTRIM(COALESCE(m.validator_2, f.validator_2)::text), '') IS NOT NULL) AS has_validator_2
   FROM picked pk
   LEFT JOIN matched m ON m.og_id = pk.og_id
   LEFT JOIN fallback f ON f.og_id = pk.og_id
@@ -446,6 +486,22 @@ SELECT
       CASE WHEN NULLIF(pk.ncbi_id::text, '') IS NULL THEN 'missing ncbi_id' END
   ) AS data_quality_flag,
   CASE
+    WHEN v.no_validation
+      OR NOT COALESCE(v.has_validator, false)
+      OR NOT COALESCE(v.has_validator_2, false)
+        THEN 'species name not validated'
+    WHEN v.validated_species_name IS DISTINCT FROM pk.nominal_species_id
+        THEN 'species mismatch: validated vs nominal'
+    WHEN NOT COALESCE(ev.submission_ready, false)
+        THEN 'flatfile not validated for ENA'
+    WHEN NULLIF(pk.ncbi_id::text, '') IS NULL
+      OR pk.ncbi_id::text !~ '^[0-9]+(\.0)?$'
+        THEN 'missing taxon ID'
+    WHEN NULLIF(BTRIM(pk.tol_id), '') IS NULL
+      OR pk.tol_id !~ '^[a-z][A-Za-z]{6}[0-9]+$'
+        THEN 'missing ToLID'
+  END AS blocking_action,
+  CASE
     WHEN NULLIF(BTRIM(es.ena_assembly_accession), '') IS NOT NULL THEN 'submitted, public'
     WHEN es.submission_status = 'ACCESSION_ASSIGNED' THEN 'submitted, accession assigned'
     WHEN es.submission_status = 'FAILED' THEN 'submission failed'
@@ -462,42 +518,4 @@ LEFT JOIN ena_submissions es
   ON es.og_id = pk.og_id AND es.tech = pk.tech AND es.seq_date = pk.seq_date
  AND es.code = pk.code AND es.annotation = pk.annotation AND es.webin_mode = 'production'
 ORDER BY pk.og_id
-"""
-
-TOLID_SQL = """
-WITH any_validated AS (
-    SELECT DISTINCT ON (og_id)
-        og_id, validated_species_name
-    FROM lca_validation
-    WHERE validated_species_name IS NOT NULL AND validated_species_name <> ''
-    ORDER BY og_id, row_created_on DESC
-),
-hifi_validated AS (
-    SELECT DISTINCT ON (og_id)
-        og_id, validated_species_name
-    FROM lca_validation
-    WHERE tech = 'hifi'
-      AND validated_species_name IS NOT NULL AND validated_species_name <> ''
-    ORDER BY og_id, row_created_on DESC
-)
-SELECT
-    s.og_id,
-    s.nominal_species_id,
-    s.embargo_status,
-    av.validated_species_name,
-    hv.validated_species_name AS hifi_validated_species_name,
-    s.ncbi_id,
-    s.tol_id,
-    CASE
-        WHEN av.validated_species_name IS NULL THEN 'needs species validation'
-        WHEN NULLIF(s.ncbi_id, '') IS NULL THEN 'needs NCBI taxon ID'
-        WHEN s.ncbi_id !~ '^[0-9]+(\.0)?$' THEN 'NCBI taxon ID not exist'
-        WHEN hv.validated_species_name IS NOT NULL AND NULLIF(s.tol_id, '') IS NULL
-            THEN 'needs ToLID request'
-    END AS action_needed
-FROM sample s
-LEFT JOIN any_validated av ON av.og_id = s.og_id
-LEFT JOIN hifi_validated hv ON hv.og_id = s.og_id
-WHERE s.hifi = 'Y'
-ORDER BY s.og_id
 """
