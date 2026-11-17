@@ -44,8 +44,8 @@ S3_COLS = ['s3_assemblies', 's3_mito', 's3_raw_hifi', 's3_raw_hic']
 
 COMBINED_COLS = (
     ['og_id', 'species', 'tol_id', 'embargo_status']
-    + [c for t in TYPES for c in ([f'{t}_upload_status', f'{t}_data_quality_flag',
-                                   f'{t}_blocking_action'] + list(EXTRA_COLS[t]))]
+    + [c for t in TYPES for c in ([f'{t}_upload_status', f'{t}_blocking_action']
+                                  + list(EXTRA_COLS[t]))]
     + S3_COLS
     + ['generated_at']
 )
@@ -109,7 +109,6 @@ def main():
         for t in TYPES:
             rec = per_type[t].get(og_id) or {}
             row.append(rec.get('upload_status'))
-            row.append(rec.get('data_quality_flag'))
             row.append(rec.get('blocking_action'))
             for src in EXTRA_COLS[t].values():
                 row.append(rec.get(src))
@@ -140,23 +139,6 @@ def main():
         print(f"\n  {t} ({len(per_type[t])} OGs):")
         for status, count in sorted(Counter(type_statuses).items()):
             print(f"    {status}: {count}")
-
-    flag_idxs = [COMBINED_COLS.index(f'{t}_data_quality_flag') for t in TYPES]
-    flagged_rows = [row for row in combined if any(row[i] for i in flag_idxs)]
-
-    if out_path:
-        flag_path = out_path.with_name(f"{out_path.stem}_flagged{out_path.suffix}")
-        with open(flag_path, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(COMBINED_COLS)
-            writer.writerows(flagged_rows)
-        print(f"\nData quality issues ({len(flagged_rows)} OGs) written to {flag_path}")
-    else:
-        print(f"\nData quality issues: {len(flagged_rows)} OGs")
-
-    for t, idx in zip(TYPES, flag_idxs):
-        n = sum(1 for row in flagged_rows if row[idx])
-        print(f"  {t}: {n}")
 
 
 if __name__ == '__main__':

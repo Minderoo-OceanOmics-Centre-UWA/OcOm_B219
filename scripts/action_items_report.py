@@ -28,7 +28,9 @@ READY = 'ready to submit'
 ACTION_ORDER = [
     READY,
     'species name not validated',
+    'validation not for this assembly',
     'species mismatch: validated vs nominal',
+    'hap1/hap2 seq_date inconsistent',
     'flatfile not validated for ENA',
     'missing taxon ID',
     'missing ToLID',

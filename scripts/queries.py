@@ -65,7 +65,6 @@ latest AS (
 matched AS (
     SELECT DISTINCT ON (lv.og_id)
         lv.og_id,
-        lv.tech,
         lv.validated_species_name,
         lv.validator,
         lv.validator_2
@@ -78,7 +77,7 @@ matched AS (
 ),
 fallback AS (
     SELECT DISTINCT ON (og_id)
-        og_id, tech, validated_species_name, validator, validator_2
+        og_id, validated_species_name, validator, validator_2
     FROM lca_validation
     WHERE validated_species_name IS NOT NULL
       AND validated_species_name <> ''
@@ -106,19 +105,13 @@ SELECT
     dg.ena_analysis_accession,
     dg.assembly_accession,
     s.embargo_status,
-    CONCAT_WS(', ',
-        CASE WHEN v.no_validation THEN 'no validated species name recorded' END,
-        CASE WHEN v.used_fallback THEN 'no ilmn validation matching seq_date' END,
-        CASE WHEN NOT v.no_validation
-              AND v.validated_species_name IS DISTINCT FROM s.nominal_species_id
-             THEN 'species mismatch: validated vs nominal' END,
-        CASE WHEN NULLIF(s.ncbi_id::text, '') IS NULL THEN 'missing ncbi_id' END
-    ) AS data_quality_flag,
     CASE
         WHEN v.no_validation
           OR NOT COALESCE(v.has_validator, false)
           OR NOT COALESCE(v.has_validator_2, false)
             THEN 'species name not validated'
+        WHEN v.used_fallback
+            THEN 'validation not for this assembly'
         WHEN v.validated_species_name IS DISTINCT FROM s.nominal_species_id
             THEN 'species mismatch: validated vs nominal'
         WHEN NULLIF(s.ncbi_id::text, '') IS NULL
@@ -169,7 +162,6 @@ matched AS (
     SELECT DISTINCT ON (lv.og_id)
         lv.og_id,
         lv.tech,
-        lv.seq_date,
         lv.validated_species_name,
         lv.validator,
         lv.validator_2
@@ -201,7 +193,6 @@ validated AS (
         o.og_id,
         COALESCE(m.tech, f.tech) AS tech,
         COALESCE(m.validated_species_name, f.validated_species_name) AS validated_species_name,
-        COALESCE(m.validator, f.validator) AS validator,
         (f.og_id IS NULL) AS no_validation,
         (f.og_id IS NOT NULL AND m.og_id IS NULL) AS used_fallback,
         (NULLIF(BTRIM(COALESCE(m.validator, f.validator)::text), '')     IS NOT NULL) AS has_validator,
@@ -274,22 +265,17 @@ SELECT
      OR NULLIF(u.gca_accession_hap1, '') IS NOT NULL
      OR NULLIF(u.gca_accession_hap2, '') IS NOT NULL) AS assembly_published,
     COALESCE(u.embargo_status, s.embargo_status) AS embargo_status,
-    CONCAT_WS(', ',
-        CASE WHEN v.no_validation THEN 'no validated species name recorded' END,
-        CASE WHEN v.used_fallback THEN 'no hifi/hic validation for this assembly' END,
-        CASE WHEN NOT v.no_validation
-              AND v.validated_species_name IS DISTINCT FROM s.nominal_species_id
-             THEN 'species mismatch: validated vs nominal' END,
-        CASE WHEN sd.min_seq_date IS DISTINCT FROM sd.max_seq_date
-             THEN 'hap1/hap2 stage-3 seq_date inconsistent' END
-    ) AS data_quality_flag,
     CASE
         WHEN v.no_validation
           OR NOT COALESCE(v.has_validator, false)
           OR NOT COALESCE(v.has_validator_2, false)
             THEN 'species name not validated'
+        WHEN v.used_fallback
+            THEN 'validation not for this assembly'
         WHEN v.validated_species_name IS DISTINCT FROM s.nominal_species_id
             THEN 'species mismatch: validated vs nominal'
+        WHEN sd.min_seq_date IS DISTINCT FROM sd.max_seq_date
+            THEN 'hap1/hap2 seq_date inconsistent'
         WHEN NULLIF(s.ncbi_id::text, '') IS NULL
           OR s.ncbi_id::text !~ '^[0-9]+(\.0)?$'
             THEN 'missing taxon ID'
@@ -474,19 +460,13 @@ SELECT
   (NULLIF(BTRIM(es.ena_analysis_accession), '') IS NOT NULL
    OR NULLIF(BTRIM(es.ena_assembly_accession), '') IS NOT NULL) AS assembly_published,
   v.validated_species_name,
-  CONCAT_WS(', ',
-      CASE WHEN v.no_validation THEN 'no validated species name recorded' END,
-      CASE WHEN v.used_fallback THEN 'no ' || LOWER(pk.chosen_tech) || ' validation matching seq_date' END,
-      CASE WHEN NOT v.no_validation
-            AND v.validated_species_name IS DISTINCT FROM pk.nominal_species_id
-           THEN 'species mismatch: validated vs nominal' END,
-      CASE WHEN NULLIF(pk.ncbi_id::text, '') IS NULL THEN 'missing ncbi_id' END
-  ) AS data_quality_flag,
   CASE
     WHEN v.no_validation
       OR NOT COALESCE(v.has_validator, false)
       OR NOT COALESCE(v.has_validator_2, false)
         THEN 'species name not validated'
+    WHEN v.used_fallback
+        THEN 'validation not for this assembly'
     WHEN v.validated_species_name IS DISTINCT FROM pk.nominal_species_id
         THEN 'species mismatch: validated vs nominal'
     WHEN NOT COALESCE(ev.submission_ready, false)
