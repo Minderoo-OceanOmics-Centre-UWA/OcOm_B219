@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Backfill sample.ncbi_id from master_species.ncbi_taxon_id.
 
-Only updates where sample.ncbi_id is blank or non-numeric and master_species has a
-valid integer ncbi_taxon_id for the OG's validated_species_name. The taxon id is
-matched to the validated name, not nominal_species_id, because the validated name
-is what the ENA pipelines submit and ENA keys the organism off the taxon id.
+Only updates where sample.ncbi_id is blank or non-numeric, the OG has a validated
+species name signed off by both validators, and master_species has a valid integer
+ncbi_taxon_id for that name. The taxon id is matched to the validated name, not
+nominal_species_id, because the validated name is what the ENA pipelines submit and
+ENA keys the organism off the taxon id. Requiring both validators keeps a one-person
+re-identification from writing a taxon id for a different species.
 
 Usage:
     singularity run $SING/psycopg2:0.1.sif python backfill_ncbi_taxon_id.py \
@@ -33,6 +35,8 @@ WITH validated AS (
     SELECT DISTINCT ON (og_id) og_id, validated_species_name
     FROM lca_validation
     WHERE validated_species_name IS NOT NULL AND validated_species_name <> ''
+      AND NULLIF(BTRIM(validator::text), '')   IS NOT NULL
+      AND NULLIF(BTRIM(validator_2::text), '') IS NOT NULL
     ORDER BY og_id, row_created_on DESC
 )
 SELECT
@@ -73,7 +77,7 @@ for og_id, validated_species_name, current_ncbi_id, ncbi_taxon_id in rows:
         continue
     updated.append((og_id, validated_species_name, current_ncbi_id, int(raw)))
 
-print(f"{'DRY RUN — ' if DRY_RUN else ''}Found {len(rows)} sample(s) with missing/invalid ncbi_id and a master_species match on the validated name.\n")
+print(f"{'DRY RUN — ' if DRY_RUN else ''}Found {len(rows)} sample(s) with missing/invalid ncbi_id and a master_species match on a fully validated name.\n")
 
 for og_id, species, current, taxon_id in updated:
     current_str = repr(current) if current else 'NULL'

@@ -28,7 +28,7 @@ Both write to `reports/`:
 - `og_status.csv` — full per-OG data. An intermediate rather than a deliverable: `generate_summary_report.py` reads it to build the PDF.
 - `og_status_action_items.txt` — a to-do list grouped by genome type then action, with the OGs needing each action listed underneath. Every assembled, unsubmitted OG appears **exactly once per genome type**, so each action is a work queue and the category counts sum to the section total. Each section also reports how many OGs are held back by embargo rather than by anything you can act on.
 
-`--check` is safe to re-run as often as you like: it never touches `reports/archive/` and reuses the cached bucket listing rather than re-fetching it. It is **not** read-only — like the full run, it first backfills any newly-issued GCA accessions (`resolve_gca_accessions.py`), so the report never reports an assembly as unpublished when ENA has already published it. That write is blank-only: it only fills a missing accession and never overwrites or clears one, so a differing value is reported as a conflict instead.
+`--check` is safe to re-run as often as you like: it never touches `reports/archive/` and reuses the cached bucket listing rather than re-fetching it. It is **not** read-only — like the full run, it first backfills any newly-issued GCA accessions (`resolve_gca_accessions.py`) and any missing NCBI taxon IDs (`backfill_ncbi_taxon_id.py`), so the report never reports an assembly as unpublished when ENA has already published it, nor an OG as missing a taxon ID that `master_species` can supply. Both writes are blank-only: they only fill a missing value and never overwrite or clear one, so a differing value is reported as a conflict instead.
 
 The run without `--check` is the single official quarterly run. It additionally:
 1. refreshes the open-data bucket listing,
@@ -71,7 +71,7 @@ singularity run $SING/psycopg2:0.1.sif python scripts/<script.py> \
 | `generate_summary_report.py` | The manager-facing PDF (reads the combined CSV, no DB access) |
 | `resolve_gca_accessions.py` | Fills public GCA accessions for all three types. `--dry-run` to preview. Kept self-contained so this repo runs without the pipelines checked out; its matching and write logic duplicates theirs, so **edit it together with** `ENA-ref-genomes/workflow/10_*`, `ENA-draft-genomes/workflow/07_*` and `ENA-mito-genomes/workflow/07_*` |
 | `public_release.py` | Refreshes and reads the open-data bucket listing |
-| `backfill_ncbi_taxon_id.py` | Fills `sample.ncbi_id` from `master_species`. `--dry-run` to preview |
+| `backfill_ncbi_taxon_id.py` | Fills `sample.ncbi_id` from `master_species`, matched on `validated_species_name` and only for OGs signed off by **both** validators — a one-person re-identification should not write a taxon id for a different species. Runs as the second step of `run_combined_report.sh` in both modes. `--dry-run` to preview |
 
 ---
 
@@ -146,7 +146,7 @@ one fails with `cannot update view`.
 
 ## Each quarter
 
-1. `--check` during the quarter; work through `og_status_action_items.txt`. Each run also backfills any GCA accessions ENA has issued since the last one, so running it often keeps the database current.
+1. `--check` during the quarter; work through `og_status_action_items.txt`. Each run also backfills any GCA accessions ENA has issued since the last one and any taxon IDs `master_species` can supply for a fully validated name, so running it often keeps the database current.
 2. When the submissions for the quarter are done, run without `--check`.
 3. View summary report under `reports/og_status_summary.pdf` — built by the full run only, so it is absent after a `--check` run.
 4. Commit and push the archived PDF — next quarter's report reads its embedded counts to compute deltas, and scratch is not durable storage.

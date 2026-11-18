@@ -33,10 +33,15 @@ if [ "$CHECK_ONLY" = false ]; then
     echo
 fi
 
-# Runs in both modes: the report is only as current as the accessions, and the write is
-# blank-only, so there is nothing to hold back during the quarter.
+# Both of these run in either mode: the report is only as current as the accessions and
+# taxon ids it reads, and both writes are blank-only, so there is nothing to hold back
+# during the quarter.
 echo "=== Filling GCA accessions from ENA (writes to the DB) ==="
 singularity run "$SING/psycopg2:0.1.sif" python3 "$SRC_DIR/resolve_gca_accessions.py" "$CONFIG"
+
+echo
+echo "=== Backfilling NCBI taxon IDs for fully validated OGs (writes to the DB) ==="
+singularity run "$SING/psycopg2:0.1.sif" python3 "$SRC_DIR/backfill_ncbi_taxon_id.py" "$CONFIG"
 
 echo
 echo "=== Querying DB -> $OUT_CSV ==="
@@ -48,8 +53,8 @@ singularity run "$SING/psycopg2:0.1.sif" python3 "$SRC_DIR/action_items_report.p
 
 if [ "$CHECK_ONLY" = true ]; then
     echo
-    echo "Check-only run: GCA accessions were backfilled, but no PDF was built or archived"
-    echo "and the open-data listing was reused as-is."
+    echo "Check-only run: GCA accessions and taxon IDs were backfilled, but no PDF was built"
+    echo "or archived, and the open-data listing was reused as-is."
     echo "Action items at $ACTION_ITEMS_TXT. Run without --check for the quarterly PDF."
 else
     echo
