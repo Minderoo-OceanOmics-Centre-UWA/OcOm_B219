@@ -112,8 +112,6 @@ SELECT
             THEN 'species name not validated'
         WHEN v.used_fallback
             THEN 'validation not for this assembly'
-        WHEN v.validated_species_name IS DISTINCT FROM s.nominal_species_id
-            THEN 'species mismatch: validated vs nominal'
         WHEN NULLIF(s.ncbi_id::text, '') IS NULL
           OR s.ncbi_id::text !~ '^[0-9]+(\.0)?$'
             THEN 'missing taxon ID'
@@ -272,8 +270,6 @@ SELECT
             THEN 'species name not validated'
         WHEN v.used_fallback
             THEN 'validation not for this assembly'
-        WHEN v.validated_species_name IS DISTINCT FROM s.nominal_species_id
-            THEN 'species mismatch: validated vs nominal'
         WHEN sd.min_seq_date IS DISTINCT FROM sd.max_seq_date
             THEN 'hap1/hap2 seq_date inconsistent'
         WHEN NULLIF(s.ncbi_id::text, '') IS NULL
@@ -467,8 +463,6 @@ SELECT
         THEN 'species name not validated'
     WHEN v.used_fallback
         THEN 'validation not for this assembly'
-    WHEN v.validated_species_name IS DISTINCT FROM pk.nominal_species_id
-        THEN 'species mismatch: validated vs nominal'
     WHEN NOT COALESCE(ev.submission_ready, false)
         THEN 'flatfile not validated for ENA'
     WHEN NULLIF(pk.ncbi_id::text, '') IS NULL

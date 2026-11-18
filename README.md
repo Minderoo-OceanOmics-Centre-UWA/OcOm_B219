@@ -85,11 +85,10 @@ for that OG (see the next section).
 |---|---|---|
 | 1 | `species name not validated` | unless `lca_validation` has a `validated_species_name` **and** both `validator` and `validator_2` are filled, it lands here |
 | 2 | `validation not for this assembly` | the validated name comes from a different `seq_date` or tech than the row being reported, so it may not describe what is being uploaded |
-| 3 | `species mismatch: validated vs nominal` | the validated name differs from `sample.nominal_species_id` |
-| 4 | `hap1/hap2 seq_date inconsistent` | reference genomes only — the two stage-3 haplotypes carry different `seq_date` values, so what is being submitted is ambiguous |
-| 5 | `flatfile not validated for ENA` | mitogenomes only — `ena_validation_latest.submission_ready` is false |
-| 6 | `missing taxon ID` | `sample.ncbi_id` is blank or not numeric |
-| 7 | `missing ToLID` | reference genomes only — `sample.tol_id` is blank or is not a ToLID. 3 rows hold a status note such as `Requested 11/06/2024`. Draft and mitogenome submissions do not need one |
+| 3 | `hap1/hap2 seq_date inconsistent` | reference genomes only — the two stage-3 haplotypes carry different `seq_date` values, so what is being submitted is ambiguous |
+| 4 | `flatfile not validated for ENA` | mitogenomes only — `ena_validation_latest.submission_ready` is false |
+| 5 | `missing taxon ID` | `sample.ncbi_id` is blank or not numeric |
+| 6 | `missing ToLID` | reference genomes only — `sample.tol_id` is blank or is not a ToLID. 3 rows hold a status note such as `Requested 11/06/2024`. Draft and mitogenome submissions do not need one |
 | — | `ready to submit` | nothing above matched |
 
 Validation comes first because the rest is wasted effort on an OG whose species is not
