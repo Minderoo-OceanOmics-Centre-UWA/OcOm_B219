@@ -24,6 +24,8 @@ OUT_CSV="${ARGS[1]:-$REPORTS_DIR/og_status.csv}"
 ACTION_ITEMS_TXT="$(dirname "$OUT_CSV")/$(basename "$OUT_CSV" .csv)_action_items.txt"
 SUMMARY_PDF="$(dirname "$OUT_CSV")/$(basename "$OUT_CSV" .csv)_summary.pdf"
 LISTING="$REPORTS_DIR/public_release_listing.txt"
+# fpdf2 + pypdf are not in the Pawsey python module; override to use another interpreter.
+PDF_PYTHON="${PDF_PYTHON:-/software/projects/pawsey1348/olivianguyen/tools/ocom_pdf/bin/python}"
 
 if [ "$CHECK_ONLY" = false ]; then
     echo "=== Refreshing the open-data bucket listing -> $LISTING ==="
@@ -52,7 +54,7 @@ if [ "$CHECK_ONLY" = true ]; then
 else
     echo
     echo "=== Building summary report -> $SUMMARY_PDF ==="
-    python3 "$SRC_DIR/generate_summary_report.py" "$OUT_CSV" "$SUMMARY_PDF"
+    "$PDF_PYTHON" "$SRC_DIR/generate_summary_report.py" "$OUT_CSV" "$SUMMARY_PDF"
 
     STAMP="$(date +%Y%m%d_%H%M%S)"
     cp "$SUMMARY_PDF" "$ARCHIVE_DIR/$(basename "$SUMMARY_PDF" .pdf)_$STAMP.pdf"

@@ -12,7 +12,9 @@ Reporting on data sharing across Ocean Genomes: reference genomes, draft genomes
 
 ## Usage
 
-Needs the `$SING/psycopg2:0.1.sif` container, `~/postgresql_details/oceanomics.cfg`, `rclone` configured with the `opendata:` remote, and `fpdf2` + `pypdf` for the PDF.
+Needs the `$SING/psycopg2:0.1.sif` container, `~/postgresql_details/oceanomics.cfg`, `rclone` configured with the `opendata:` remote, and `fpdf2` + `pypdf` for the PDF. Those two are not in the Pawsey `python` module, so the PDF step
+uses the venv at `/software/projects/pawsey1348/olivianguyen/tools/ocom_pdf`; set `PDF_PYTHON` to
+override it.
 
 ```bash
 # Triage during the quarter — CSVs + action items only:
