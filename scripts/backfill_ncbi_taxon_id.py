@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Backfill sample.ncbi_id from master_species.ncbi_taxon_id.
 
-Only updates where sample.ncbi_id is blank or non-numeric, lca_validation confirms
-validated_species_name = nominal_species_id, and master_species.ncbi_taxon_id is a
-valid integer.
+Only updates where sample.ncbi_id is blank or non-numeric and master_species has a
+valid integer ncbi_taxon_id for the OG's validated_species_name. The taxon id is
+matched to the validated name, not nominal_species_id, because the validated name
+is what the ENA pipelines submit and ENA keys the organism off the taxon id.
 
 Usage:
     singularity run $SING/psycopg2:0.1.sif python backfill_ncbi_taxon_id.py \
@@ -28,23 +29,25 @@ conn = psycopg2.connect(
 conn.autocommit = False
 
 FIND_SQL = """
+WITH validated AS (
+    SELECT DISTINCT ON (og_id) og_id, validated_species_name
+    FROM lca_validation
+    WHERE validated_species_name IS NOT NULL AND validated_species_name <> ''
+    ORDER BY og_id, row_created_on DESC
+)
 SELECT
     s.og_id,
-    s.nominal_species_id,
+    v.validated_species_name,
     s.ncbi_id        AS current_ncbi_id,
     ms.ncbi_taxon_id AS new_ncbi_id
 FROM sample s
-JOIN master_species ms ON ms.species = s.nominal_species_id
+JOIN validated v ON v.og_id = s.og_id
+JOIN master_species ms ON ms.species = v.validated_species_name
 WHERE (
     NULLIF(s.ncbi_id::text, '') IS NULL
     OR s.ncbi_id::text !~ '^[0-9]+(\\.0)?$'
 )
   AND ms.ncbi_taxon_id IS NOT NULL
-  AND EXISTS (
-      SELECT 1 FROM lca_validation v
-      WHERE v.og_id = s.og_id
-        AND v.validated_species_name = s.nominal_species_id
-  )
 ORDER BY s.og_id;
 """
 
@@ -61,16 +64,16 @@ if not rows:
 updated = []
 skipped = []
 
-for og_id, nominal_species_id, current_ncbi_id, ncbi_taxon_id in rows:
+for og_id, validated_species_name, current_ncbi_id, ncbi_taxon_id in rows:
     raw = str(ncbi_taxon_id).strip() if ncbi_taxon_id else ''
     if raw.endswith('.0'):  # not rstrip('.0'), which would turn 372800 into 3728
         raw = raw[:-2]
     if not raw.isdigit():
-        skipped.append((og_id, nominal_species_id, ncbi_taxon_id, 'not numeric'))
+        skipped.append((og_id, validated_species_name, ncbi_taxon_id, 'not numeric'))
         continue
-    updated.append((og_id, nominal_species_id, current_ncbi_id, int(raw)))
+    updated.append((og_id, validated_species_name, current_ncbi_id, int(raw)))
 
-print(f"{'DRY RUN — ' if DRY_RUN else ''}Found {len(rows)} sample(s) with missing/invalid ncbi_id, validated species name, and a master_species match.\n")
+print(f"{'DRY RUN — ' if DRY_RUN else ''}Found {len(rows)} sample(s) with missing/invalid ncbi_id and a master_species match on the validated name.\n")
 
 for og_id, species, current, taxon_id in updated:
     current_str = repr(current) if current else 'NULL'
